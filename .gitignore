@@ -1,0 +1,11 @@
+# runtime output: contains ticket content and query results
+logs/
+data/
+# local secrets (staging DB creds, test account)
+.env
+# read-only knowledge clones and installed tools (recreate with tools/setup.sh)
+knowledge/
+tools/dbhub/node_modules/
+lark-im-resources/
+__pycache__/
+.DS_Store

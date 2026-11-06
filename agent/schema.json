@@ -1,0 +1,31 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "confidence", "evidence", "priority_suggested", "priority_reason", "missing_info", "reply_markdown", "sources", "summary"],
+  "properties": {
+    "type": {"type": "string", "enum": ["A", "B", "C", "D", "E", "?"]},
+    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_be", "db", "newrelic"],
+      "properties": {
+        "source_be": {"type": "object", "additionalProperties": false, "required": ["status", "detail"], "properties": {
+          "status": {"type": "string", "enum": ["confirmed", "contradicts", "not_found", "not_checked"]},
+          "detail": {"type": "string", "description": "đường dẫn:dòng và logic tìm được"}}},
+        "db": {"type": "object", "additionalProperties": false, "required": ["status", "detail"], "properties": {
+          "status": {"type": "string", "enum": ["confirmed", "contradicts", "not_found", "not_checked"]},
+          "detail": {"type": "string", "description": "database.bảng, khóa tra, giá trị liên quan"}}},
+        "newrelic": {"type": "object", "additionalProperties": false, "required": ["status", "detail"], "properties": {
+          "status": {"type": "string", "enum": ["confirmed", "contradicts", "not_found", "not_checked"]},
+          "detail": {"type": "string", "description": "NRQL/entity, khoảng thời gian, kết quả"}}}
+      }
+    },
+    "priority_suggested": {"type": "string", "enum": ["High", "Medium", "Low"]},
+    "priority_reason": {"type": "string"},
+    "missing_info": {"type": "array", "items": {"type": "string"}},
+    "reply_markdown": {"type": "string"},
+    "sources": {"type": "array", "items": {"type": "string"}},
+    "summary": {"type": "string", "description": "1-2 câu cho cột AI Note và người trực"}
+  }
+}
