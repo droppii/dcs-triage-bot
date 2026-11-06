@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
-"""Offline self-check for bot.py pure logic (no Lark / Claude calls). Run: python3 test_bot.py"""
+"""Offline self-check for bot.py pure logic (no Lark / Claude calls). Run: python3 tests/test_bot.py"""
+import sys
 from datetime import datetime
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import bot
 
 # sanitize: secrets and PII never reach the thread

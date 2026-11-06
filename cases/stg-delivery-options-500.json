@@ -1,0 +1,25 @@
+{
+ "ticket": {
+  "Title": "Đối tác không lên được đơn, app báo lỗi khi chọn vận chuyển",
+  "Description": "Đối tác nhudoan01 lên đơn cho khách trên app Biz, kho HCM, tới bước chọn đơn vị vận chuyển thì app báo lỗi, không đặt được. Bị lúc khoảng 15h30 hôm nay (06/11).",
+  "Priority": "High",
+  "Product": "Biz App",
+  "Feature": "Đơn hàng",
+  "ReportedBy": "QA test"
+ },
+ "expect": {
+  "verdict": "? (C chỉ khi có stack trace chỉ ra dòng gây lỗi)",
+  "valid_until": "2026-12-06 (New Relic giữ ~30 ngày)",
+  "must_mention": [
+   "TransactionError vn-stg-order-service POST /api/v1/app/carts/my-open-cart/delivery-options 500",
+   "NullPointerException \"uuid\" is null lúc ~15:30 06/11 (+0700)",
+   "CartServiceImpl.getDeliveryOptionsForMyOpenCart"
+  ],
+  "must_not": [
+   "hỏi vận hành tên kho/địa chỉ/tỉnh"
+  ],
+  "routed_to_oncall": true,
+  "data_note": "Dữ liệu tạo bằng tools/stg_case.py (cart nhudoan01) nên request có User-Agent droppii-qa-dcs-bot-test."
+ },
+ "created": "2026-11-06"
+}

@@ -1,0 +1,23 @@
+{
+ "ticket": {
+  "Title": "Tồn Odoo hết nhưng ERP còn thể hiện - Frudia Blueberry cleansing gel 145ml",
+  "Description": "Sản phẩm Frudia Blueberry cleansing gel 145ml kho HCM: bên Odoo báo hết nhưng ERP vẫn còn thể hiện tồn, đối tác đặt được mà kho không có hàng xuất. Nhờ check giúp.",
+  "Priority": "High",
+  "Product": "Admin Dashboard",
+  "Feature": "Sản phẩm",
+  "ReportedBy": "QA test"
+ },
+ "expect": {
+  "mirrors_prod": "D1105-3872",
+  "verdict": "?",
+  "must_mention": [
+   "tồn Odoo stock_quant kho HCM (quantity, reserved)",
+   "tồn ERP product.stock_quantities kho HCM"
+  ],
+  "must_not": [
+   "hỏi vận hành mã đơn/thời điểm"
+  ],
+  "known_variance": "Hai lần chạy 06/11 ra kết luận khác nhau (lệch / chưa tái hiện): chạy nhiều lần khi đánh giá."
+ },
+ "created": "2026-11-06"
+}

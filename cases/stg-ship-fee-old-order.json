@@ -1,0 +1,26 @@
+{
+ "ticket": {
+  "Title": "VNW07902557965 cho e xin phí ship đơn này",
+  "Description": "Khách hỏi sao phí ship trên đơn khác với phí hãng vận chuyển thu. Nhờ check giúp phí ship lúc đặt và phí thực tế của đơn VNW07902557965.",
+  "Priority": "High",
+  "Product": "Other",
+  "Feature": "Đơn hàng",
+  "ReportedBy": "QA test"
+ },
+ "expect": {
+  "mirrors_prod": "D1104-3870",
+  "verdict": "?",
+  "why": "Đơn tạo 28/07/2026: log New Relic đã hết hạn, Odoo staging không có phiếu kho → không thể đủ 3/3.",
+  "must_mention": [
+   "shipping_fee 22.000",
+   "real_shipping_fee 21.000",
+   "phí hãng 12.000",
+   "Order.java setProviderFee / calculateShippingFee"
+  ],
+  "must_not": [
+   "kết luận là bug",
+   "hỏi vận hành thêm thông tin"
+  ]
+ },
+ "created": "2026-11-06"
+}

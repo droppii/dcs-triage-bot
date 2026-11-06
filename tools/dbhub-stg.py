@@ -2,14 +2,15 @@
 """Run DBHub 1.5.0 (stdio) against STAGING Postgres, read-only, same limits as the shared VM.
 
 Mirrors engineering-knowledge handbook/ai-context/agent-connections/azure-host/postgres-observe.py:
-readonly = true, max_rows = 100, query_timeout = 15s. Creds come from the automation-test .env
-(staging service creds via the local cloudflared tunnel); never printed, temp config deleted on exit.
+readonly = true, max_rows = 100, query_timeout = 15s. Staging service creds (Head: "creds ở staging lấy theo
+services") come from env DB_HOST/DB_PORT/DB_USER/DB_PASSWORD, or from the file named in DCS_STG_DB_ENV_FILE
+(e.g. the automation-test .env). Never printed; the temp config is deleted on exit.
 """
 import json, os, re, subprocess, sys, tempfile
 from pathlib import Path
 
-ENV = Path.home() / 'Documents/02_Playwright/automation-test/automation-test/.env'
 DBHUB = Path(__file__).parent / 'dbhub/node_modules/@bytebase/dbhub/dist/index.js'
+KEYS = {'DB_HOST', 'DB_PORT', 'DB_USER', 'DB_PASSWORD'}
 # source id -> staging database (vn_stg_*). Add a line here to expose another service DB.
 DATABASES = {
     'stg_order': 'vn_stg_order_service_20241119',
@@ -25,15 +26,17 @@ DATABASES = {
 
 
 def read_env():
-    # The .env can't be sourced whole (unquoted values); take only the DB keys.
-    env = {}
-    for line in ENV.read_text().splitlines():
-        m = re.match(r'^(DB_(?:HOST|PORT|USER|PASSWORD))=(.*)$', line.strip())
-        if m:
-            env[m.group(1)] = m.group(2).strip().strip('"\'')
-    missing = {'DB_HOST', 'DB_PORT', 'DB_USER', 'DB_PASSWORD'} - env.keys()
+    env = {k: os.environ[k] for k in KEYS if os.environ.get(k)}
+    src = os.environ.get('DCS_STG_DB_ENV_FILE')
+    if KEYS - env.keys() and src:
+        # Such files often can't be sourced whole (unquoted values); take only the DB keys.
+        for line in Path(src).expanduser().read_text().splitlines():
+            m = re.match(r'^(DB_(?:HOST|PORT|USER|PASSWORD))=(.*)$', line.strip())
+            if m:
+                env.setdefault(m.group(1), m.group(2).strip().strip('"\''))
+    missing = KEYS - env.keys()
     if missing:
-        sys.exit(f'dbhub-stg: missing {sorted(missing)} in {ENV}')
+        sys.exit(f'dbhub-stg: missing {sorted(missing)}; set them in .env or point DCS_STG_DB_ENV_FILE to a file')
     return env
 
 

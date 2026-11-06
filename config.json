@@ -1,0 +1,22 @@
+{
+  "sandbox": {
+    "note": "Staging sandbox: copy of the DCS Base (structure only) + test topic group. The bot may only write here.",
+    "base_token": "AHDmbnt6eaAa6asZLHAlfOmkgpd",
+    "tickets_table": "tbl4UiCUszPyEvdF",
+    "chat_id": "oc_1861966f1b33af544be0bfadd6ebe6d3"
+  },
+  "oncall_source": {
+    "note": "Real DCS Base, READ ONLY: Schedule table = on-call rota, used to print who a ticket would go to (no @tag).",
+    "base_token": "UMiebZAFMahsj2s54uhlz3Ojgeh",
+    "schedule_table": "tblw7ZnVIRvIlrXz"
+  },
+  "model": "sonnet",
+  "poll_seconds": 60,
+  "card_wait_minutes": 3,
+  "claude_timeout_seconds": 900,
+  "knowledge": [
+    {"name": "engineering-knowledge", "url": "https://github.com/droppii/engineering-knowledge.git", "branch": "main"},
+    {"name": "mono-backend", "url": "https://github.com/droppii/mono-backend.git", "branch": "dev"},
+    {"name": "droppii-odoo", "url": "https://github.com/droppii/droppii-odoo.git", "branch": "dev", "sparse": ["develop"]}
+  ]
+}

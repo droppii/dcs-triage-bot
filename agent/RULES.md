@@ -62,9 +62,9 @@ Username/ID tài khoản là mã tham chiếu hợp lệ; giờ gần đúng ("k
 - Postgres staging qua DBHub (`execute_sql_*`): stg_order, stg_product, stg_promotion, stg_user, stg_identity, stg_chat, stg_notifier, stg_marketing, và **stg_odoo_service = database Odoo 14 staging (WMS: stock_picking, sale_order, stock_quant, order_delivery_log…; thời gian lưu UTC, giờ VN = +7)**. Xem schema trước khi query (information_schema), LIMIT ≤ 20, chỉ chọn cột cần (bảng log có thể chứa địa chỉ/SĐT).
 - New Relic account 3477658, app staging tên `vn-stg-<service>` (order, user, promotion, identity, segment, chat, gamification, odoo). Không có staging cho product/search/marketing/notifier/gateway.
 - Sentry (org droppii-kp: chat-ai, ddc, game90ntc, mall-verification, referral, web-mall; lọc environment staging nếu có). Bugsnag: Droppii Biz, Droppii Mall (lọc release stage).
-- Đặc tả PO: `/Users/nhudoan/dcs-bot/knowledge/engineering-knowledge/handbook/product/packs/` (biz, biz-app, biz-web, mall, mall-app, mall-web, pdp-portal, erp, odoo, obefe). Handbook ở cùng repo.
-- Code Odoo: `/Users/nhudoan/Documents/12_QAworkflows/droppii-odoo/`.
-- Code backend: `/Users/nhudoan/dcs-bot/knowledge/mono-backend/` (nhánh `dev`, là bản staging build; không chắc trùng production). Java order/promotion ở `java/services/`, C# product/identity ở `csharp/`, TS ở `typescript/`. Không có lịch sử commit.
+- Đặc tả PO: `{KNOWLEDGE}/engineering-knowledge/handbook/product/packs/` (biz, biz-app, biz-web, mall, mall-app, mall-web, pdp-portal, erp, odoo, obefe). Handbook ở cùng repo.
+- Code Odoo: `{KNOWLEDGE}/droppii-odoo/develop/`.
+- Code backend: `{KNOWLEDGE}/mono-backend/` (nhánh `dev`, là bản staging build; không chắc trùng production). Java order/promotion ở `java/services/`, C# product/identity ở `csharp/`, TS ở `typescript/`. Không có lịch sử commit.
 Không gọi hết mọi nguồn: chọn nguồn đúng câu hỏi, dừng khi đủ căn cứ.
 
 ## Câu trả lời (`reply_markdown`)

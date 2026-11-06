@@ -6,36 +6,49 @@ Each tick: read tickets from the sandbox Base -> find the ticket card in the san
 Prod is only READ (Schedule = on-call rota). Every write is guarded to the sandbox Base / sandbox chat.
 
   python3 bot.py --once            one tick
-  python3 bot.py                   loop every 60s
-  python3 bot.py --dry-ticket F    run the brain on a ticket JSON file, print result, write nothing
+  python3 bot.py                   loop (config poll_seconds)
+  python3 bot.py --dry-ticket F    run the brain on a ticket or cases/*.json file, print result, write nothing
+Config: config.json (or $DCS_CONFIG). Local secrets: .env (see .env.example).
 """
-import argparse, json, os, re, subprocess, sys, time
+import argparse, getpass, json, os, re, subprocess, sys, time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 LOGS = ROOT / 'logs'
+KNOWLEDGE_DIR = ROOT / 'knowledge'
 TZ = timezone(timedelta(hours=7))
+CFG = json.loads(Path(os.environ.get('DCS_CONFIG', ROOT / 'config.json')).read_text())
 
-SANDBOX_BASE = 'AHDmbnt6eaAa6asZLHAlfOmkgpd'
-SANDBOX_TICKETS = 'tbl4UiCUszPyEvdF'
-SANDBOX_CHAT = 'oc_1861966f1b33af544be0bfadd6ebe6d3'
-PROD_BASE = 'UMiebZAFMahsj2s54uhlz3Ojgeh'  # read-only
-PROD_SCHEDULE = 'tblw7ZnVIRvIlrXz'
 
-MODEL = os.environ.get('DCS_MODEL', 'sonnet')
-POLL_SECONDS = 60
-CARD_WAIT = timedelta(minutes=3)
-CLAUDE_TIMEOUT = 900
+def load_dotenv(path=ROOT / '.env'):
+    """KEY=VALUE lines from the repo .env into os.environ (existing env wins). Values are never printed."""
+    if path.exists():
+        for line in path.read_text().splitlines():
+            if '=' in line and not line.lstrip().startswith('#'):
+                k, v = line.split('=', 1)
+                os.environ.setdefault(k.strip(), v.strip().strip('"\''))
+
+
+load_dotenv()
+
+SANDBOX_BASE = CFG['sandbox']['base_token']
+SANDBOX_TICKETS = CFG['sandbox']['tickets_table']
+SANDBOX_CHAT = CFG['sandbox']['chat_id']
+PROD_BASE = CFG['oncall_source']['base_token']  # read-only
+PROD_SCHEDULE = CFG['oncall_source']['schedule_table']
+
+MODEL = os.environ.get('DCS_MODEL', CFG['model'])
+POLL_SECONDS = CFG['poll_seconds']
+CARD_WAIT = timedelta(minutes=CFG['card_wait_minutes'])
+CLAUDE_TIMEOUT = CFG['claude_timeout_seconds']
 
 TYPE_LABEL = {'A': 'A - Tra cứu', 'B': 'B - Cách dùng/Đúng thiết kế', 'C': 'C - Bug', 'D': 'D - Chỉnh dữ liệu',
               'E': 'E - Đề xuất', '?': '? - Không chắc'}
 TICKET_FIELDS = ['Code', 'Title', 'Description', 'Priority', 'Product', 'Feature', 'Status', 'Date Created',
                  'ReportedBy', 'Bot Status', 'Bot Thread']
 
-KNOWLEDGE = [str(ROOT / 'knowledge/engineering-knowledge'),  # bot's own shallow clone of main; `git pull` to refresh
-             str(ROOT / 'knowledge/mono-backend'),  # shallow clone of branch dev (= what staging builds from)
-             '/Users/nhudoan/Documents/12_QAworkflows/droppii-odoo']
+KNOWLEDGE = [str(KNOWLEDGE_DIR / k['name']) for k in CFG['knowledge']]  # read-only clones made by tools/setup.sh
 READ_TOOLS = (
     [f'Read(/{p}/**)' for p in KNOWLEDGE] + [f'Grep(/{p}/**)' for p in KNOWLEDGE] + [f'Glob(/{p}/**)' for p in KNOWLEDGE]
     + ['mcp__dbhub']  # DBHub itself enforces readonly=true, max 100 rows, 15s
@@ -191,6 +204,26 @@ def pick_oncall(rows, product, now):
 
 # ---------- brain ----------
 
+def mcp_config():
+    """MCP servers for the brain. HTTP ones use the runner's own OAuth login (claude /mcp); dbhub is local + readonly."""
+    return json.dumps({'mcpServers': {
+        'sentry': {'type': 'http', 'url': 'https://mcp.sentry.dev/mcp'},
+        'bugsnag': {'type': 'http', 'url': 'https://bugsnag.mcp.smartbear.com/mcp'},
+        'newrelic': {'type': 'http', 'url': 'https://mcp.newrelic.com/mcp/'},
+        'dbhub': {'type': 'stdio', 'command': sys.executable, 'args': ['-I', str(ROOT / 'tools/dbhub-stg.py')]},
+    }})
+
+
+def rules():
+    return (ROOT / 'agent/RULES.md').read_text().replace('{KNOWLEDGE}', str(KNOWLEDGE_DIR))
+
+
+def claude_cmd(prompt, model):
+    return ['claude', '-p', prompt, '--model', model, '--output-format', 'stream-json', '--verbose',
+            '--mcp-config', mcp_config(), '--strict-mcp-config', '--setting-sources', '',
+            '--tools', 'Read,Grep,Glob', '--permission-mode', 'dontAsk', '--allowedTools', *READ_TOOLS]
+
+
 def run_brain(ticket, thread_text='', label='dry'):
     prompt = (
         f"Thời điểm hiện tại: {datetime.now(TZ):%Y-%m-%d %H:%M} (Asia/Ho_Chi_Minh).\n"
@@ -198,16 +231,15 @@ def run_brain(ticket, thread_text='', label='dry'):
         f"<ticket>\n{json.dumps(ticket, ensure_ascii=False, indent=1)}\n</ticket>\n"
         f"<thread>\n{thread_text or '(chưa có trao đổi)'}\n</thread>"
     )
-    cmd = ['claude', '-p', prompt, '--model', MODEL, '--output-format', 'stream-json', '--verbose',
-           '--append-system-prompt', (ROOT / 'agent/RULES.md').read_text(),
-           '--json-schema', (ROOT / 'agent/schema.json').read_text(),
-           '--mcp-config', str(ROOT / 'agent/mcp.json'), '--strict-mcp-config', '--setting-sources', '',
-           '--tools', 'Read,Grep,Glob', '--permission-mode', 'dontAsk', '--allowedTools', *READ_TOOLS]
+    # --allowedTools is variadic, so it must stay last in claude_cmd(); extra flags go before it
+    cmd = claude_cmd(prompt, MODEL)
+    i = cmd.index('--allowedTools')
+    cmd[i:i] = ['--append-system-prompt', rules(), '--json-schema', (ROOT / 'agent/schema.json').read_text()]
     LOGS.mkdir(exist_ok=True)
     log = LOGS / f'{label}-{datetime.now(TZ):%Y%m%d-%H%M%S}.jsonl'
     with open(log, 'w') as f:  # full transcript = audit log of every tool call / query
         subprocess.run(cmd, cwd=ROOT / 'agent', stdout=f, stderr=subprocess.STDOUT, timeout=CLAUDE_TIMEOUT,
-                       env={**os.environ, 'USER': os.environ.get('USER', 'nhudoan')})
+                       env={**os.environ, 'USER': os.environ.get('USER') or getpass.getuser()})  # launchd: claude needs USER
     result = None
     for line in log.read_text().splitlines():
         try:
@@ -368,9 +400,13 @@ def main():
     ap.add_argument('--dry-ticket', help='ticket JSON file: run the brain only, write nothing')
     a = ap.parse_args()
     if a.dry_ticket:
-        out = run_brain(json.loads(Path(a.dry_ticket).read_text()), label='dry')
+        doc = json.loads(Path(a.dry_ticket).read_text())
+        ticket = doc.get('ticket', doc)  # cases/*.json wrap the ticket next to the expected outcome
+        out = run_brain(ticket, label='dry-' + Path(a.dry_ticket).stem)
         print(json.dumps(out, ensure_ascii=False, indent=1))
-        print('\n--- reply preview ---\n' + sanitize(compose_reply(out, json.loads(Path(a.dry_ticket).read_text()), '<người trực>', '<BA-QA>')))
+        print('\n--- reply preview ---\n' + sanitize(compose_reply(out, ticket, '<người trực>', '<BA-QA>')))
+        if 'expect' in doc:
+            print('\n--- expected (compare by hand) ---\n' + json.dumps(doc['expect'], ensure_ascii=False, indent=1))
         return
     while True:
         try:

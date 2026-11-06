@@ -1,0 +1,23 @@
+{
+ "ticket": {
+  "Title": "Đối tác không áp được voucher",
+  "Description": "Đối tác báo không áp được voucher khi đặt hàng, nhờ team check gấp.",
+  "Priority": "High",
+  "Product": "Biz App",
+  "Feature": "Voucher",
+  "ReportedBy": "QA test"
+ },
+ "expect": {
+  "verdict": "missing_info",
+  "ask_only": [
+   "mã voucher",
+   "tài khoản đối tác hoặc mã đơn",
+   "thời điểm"
+  ],
+  "must_not": [
+   "hỏi ảnh, thông báo lỗi, số người bị ảnh hưởng"
+  ],
+  "routed_to_oncall": true
+ },
+ "created": "2026-11-06"
+}

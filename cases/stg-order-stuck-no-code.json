@@ -1,0 +1,19 @@
+{
+ "ticket": {
+  "Title": "Đơn bị kẹt trạng thái, không qua được giao hàng",
+  "Description": "Đơn của đối tác bị kẹt mãi không chuyển sang đang giao, khách hối quá. Nhờ team check gấp giúp em.",
+  "Priority": "High",
+  "Product": "Biz App",
+  "Feature": "Đơn hàng",
+  "ReportedBy": "QA test"
+ },
+ "expect": {
+  "verdict": "missing_info",
+  "ask_only": [
+   "mã đơn",
+   "thời điểm bắt đầu kẹt"
+  ],
+  "routed_to_oncall": true
+ },
+ "created": "2026-11-06"
+}
