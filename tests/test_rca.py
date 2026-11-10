@@ -125,13 +125,13 @@ o['_versions'] = {'mono-backend': {'sha': 'a' * 40, 'branch': 'dev', 'date': '20
 know = [{'name': 'mono-backend', 'url': 'https://github.com/droppii/mono-backend.git', 'branch': 'dev'}]
 text = '\n'.join(rca.render_rca(o, know, K, confirmed=True))
 assert 'https://github.com/droppii/mono-backend/blob/' + 'a' * 40 + '/java/order/CartServiceImpl.java#L40' in text, text
-assert 'NGUYÊN NHÂN GỐC' in text and '**Cơ chế:**' in text and 'getUuid' in text and 'mono-backend@aaaaaaaa' in text
+assert 'ROOT CAUSE' in text and '**Mechanism:**' in text and 'getUuid' in text and 'mono-backend@aaaaaaaa' in text
 _cand = '\n'.join(rca.render_rca(o, know, K, confirmed=False))
-assert '**NGUYÊN NHÂN:**' in _cand and 'NGUYÊN NHÂN GỐC' not in _cand
+assert '**CAUSE:**' in _cand and 'ROOT CAUSE' not in _cand
 # versions list every clone; only the repos the RCA cites may appear as "đã dẫn"
 o['_versions']['web-mall'] = {'sha': 'b' * 40, 'branch': 'main', 'date': '2026-11-09'}
 text = '\n'.join(rca.render_rca(o, know, K, confirmed=True))
-assert 'mono-backend@aaaaaaaa' in text and 'web-mall@' not in text and 'Bản code đã dẫn' in text, text
+assert 'mono-backend@aaaaaaaa' in text and 'web-mall@' not in text and 'Code refs' in text, text
 
 # --- bot.compose_reply: unconfirmed C still hands the candidate to on-call (this was hidden before) ---
 o = make()
@@ -144,8 +144,8 @@ try:
     r = bot.compose_reply(o, {'Priority': ['High']}, 'Dev C', 'BA D')
 finally:
     bot.KNOWLEDGE_DIR = old_k
-assert '**Loại:** `? - Không chắc`' in r and '**NGUYÊN NHÂN:**' in r and 'CartServiceImpl.java:40' in r and '**Chuyển:** Dev C' in r, r
-assert '**Đã loại giả thuyết khác:** `✗`' in r, r
+assert '**Type:** `? - Không chắc`' in r and '**CAUSE:**' in r and 'CartServiceImpl.java:40' in r and '**Assign to:** Dev C' in r, r
+assert '**Alternatives ruled out:** `✗`' in r, r
 
 # --- bot.finalize_log: a saved transcript -> verified result (same path eval --from-log uses) ---
 good = make()
@@ -159,7 +159,7 @@ try:
     fin = bot.finalize_log(logf, versions={'mono-backend': {'sha': 'b' * 40, 'branch': 'dev', 'date': '2026-11-09'}})
     assert bot.verdict(fin) == 'C' and fin['_cost'] == 0.2 and fin['_tool_calls'] == 2 and fin['_problems'] == []
     reply = bot.compose_reply(fin, {'Priority': ['High']}, 'Dev C', 'BA D')
-    assert 'NGUYÊN NHÂN GỐC' in reply and 'blob/' + 'b' * 40 in reply and '**Loại:** `C - Bug`' in reply, reply
+    assert 'ROOT CAUSE' in reply and 'blob/' + 'b' * 40 in reply and '**Type:** `C - Bug`' in reply, reply
     assert 'code: mono-backend/java/order/CartServiceImpl.java:40' in bot.bot_fields(fin, 'Đã chuyển người')['AI Note']
     # a run that crashed has no structured output -> raises (bot.fail() then hands the ticket to on-call)
     bad_log = logf.with_name('bad.jsonl')
@@ -253,9 +253,9 @@ rca.validate(o, tr, K, LAYERS)
 o['_versions'] = {'biz-mobile': {'sha': 'c' * 40, 'branch': 'main', 'date': '2026-11-09'}}
 know2 = know + [{'name': 'biz-mobile', 'url': 'https://github.com/droppii/biz-mobile.git', 'branch': 'main'}]
 text = '\n'.join(rca.render_rca(o, know2, K, confirmed=True))
-assert '**Lớp lỗi:** `mobile` (code đọc ở v3.12.0)' in text and '**Phiên bản client:** Biz Mobile 3.12.0' in text, text
+assert '**Layer:** `mobile` (code read at v3.12.0)' in text and '**Client version:** Biz Mobile 3.12.0' in text, text
 assert 'https://github.com/droppii/biz-mobile/blob/v3.12.0/src/CartScreen.tsx#L2' in text, text
-assert 'phiên bản app/bundle' == rca.CHECK_LABEL['client_version']
+assert 'Client version' == rca.CHECK_LABEL['client_version']
 
 # --- a bare file name / partial path resolves only when exactly one file matches (models often cite "Foo.java:73") ---
 (K / 'mono-backend/y').mkdir(); (K / 'biz-mobile/z').mkdir()
@@ -322,12 +322,12 @@ assert ok_read['rca']['code_location']['verified'], ok_read['_problems']        
 nr = make()
 rca.validate(nr, tr, K)
 nr['_versions'] = {}
-assert 'chưa có dấu hiệu runtime khớp' not in '\n'.join(rca.render_rca(nr, know, K, confirmed=True))
+assert 'chưa có runtime signal khớp' not in '\n'.join(rca.render_rca(nr, know, K, confirmed=True))
 nr2 = make()
 nr2['rca']['decisive_signal']['quote'] = 'a line that no tool ever returned'
 rca.validate(nr2, tr, K)
 nr2['_versions'] = {}
-assert 'chưa có dấu hiệu runtime khớp' in '\n'.join(rca.render_rca(nr2, know, K, confirmed=False))
+assert 'chưa có runtime signal khớp' in '\n'.join(rca.render_rca(nr2, know, K, confirmed=False))
 
 # --- loose comparison: quotes / backslashes / whitespace do not matter (they break the model's JSON, so it is told to drop them) ---
 assert rca.loose(' a "b" \\ x `c` ') == 'abxc' and rca.loose("it's") == 'its'

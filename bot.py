@@ -572,7 +572,7 @@ def sanitize(text):
 
 
 CHECKS = (('source_be', 'Code BE'), ('db', 'DB'), ('newrelic', 'New Relic'))
-MARK = {'confirmed': '✓', 'contradicts': '✗ ngược', 'not_found': '✗ không thấy', 'not_checked': '– chưa kiểm'}
+MARK = {'confirmed': '✓', 'contradicts': '✗ contradicts', 'not_found': '✗ not found', 'not_checked': '– not checked'}
 
 
 def gated(out):
@@ -590,28 +590,28 @@ def compose_reply(out, ticket, person, baqa):
     """Same form as the Jira triage cards: UPPERCASE title, "- **Label:** `value` (confidence) — *reason*" bullets."""
     eff = verdict(out)
     pct = lambda c: f" ({round(float(c) * 100)}%)" if isinstance(c, (int, float)) else ''
-    lines = [f"✨ **{LABEL} DCS Triage Bot — kết quả phân tích.**"]
+    lines = [f"✨ **{LABEL} DCS Triage Bot — analysis result.**"]
     if out['reply_markdown'].strip():
-        lines += ['', '**TÓM TẮT:**', out['reply_markdown'].strip()]
-    verdict_line = f"- **Loại:** `{TYPE_LABEL[eff]}`"
+        lines += ['', '**SUMMARY:**', out['reply_markdown'].strip()]
+    verdict_line = f"- **Type:** `{TYPE_LABEL[eff]}`"
     if eff != out['type']:
         miss = [rca.CHECK_LABEL.get(n, n) for n in rca.gate_failures(out, GATE)]
-        why = ('thiếu: ' + ', '.join(miss)) if miss else 'verifier độc lập không xác nhận'
-        verdict_line += (f" (nghi {TYPE_LABEL[out['type']]}{pct(out.get('confidence'))}) — *Chưa đủ bằng chứng nên chưa kết luận; "
-                         f"{why}. Người trực kiểm tra tiếp từ các bằng chứng bên dưới.*")
+        why = ('missing: ' + ', '.join(miss)) if miss else 'independent verifier did not confirm'
+        verdict_line += (f" (suspected {TYPE_LABEL[out['type']]}{pct(out.get('confidence'))}) — *Not enough evidence to conclude yet; "
+                         f"{why}. On-call to continue from the evidence below.*")
     else:
         verdict_line += pct(out.get('confidence'))
-    lines += ['', '**KẾT LUẬN:**', verdict_line]
+    lines += ['', '**TRIAGE RESULT:**', verdict_line]
     reported = text_of(ticket.get('Priority'))
     if reported and out['priority_suggested'] != reported:
         lines.append(f"- **Priority:** `{reported} → {out['priority_suggested']}` — *{out['priority_reason']}*")
     route = {'C': person, 'D': person, '?': person, 'E': baqa}.get(eff)
     # plan: a High ticket goes to on-call right away, even while the bot is still waiting for the reporter
     if route is not None and (not out['missing_info'] or out['priority_suggested'] == 'High'):
-        who = route or '(không tìm thấy lịch trực cho Product này)'
-        lines.append(f"- **Chuyển:** {who} *(sandbox: chỉ ghi tên, không tag)*")
+        who = route or '(no on-call schedule found for this Product)'
+        lines.append(f"- **Assign to:** {who} *(sandbox: name only, no tag)*")
     if out['type'] != 'E' and not out['missing_info']:  # show what was checked whenever an investigation ran
-        lines += ['', '**ĐÃ KIỂM:**']
+        lines += ['', '**EVIDENCE CHECKED:**']
         for k, name in CHECKS:
             ev = out['evidence'][k]
             detail = sanitize(str(ev.get('detail') or '')).replace('*', '')[:200]
