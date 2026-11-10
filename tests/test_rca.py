@@ -41,6 +41,8 @@ transcript = '\n'.join([
     ev('result', is_error=False, structured_output={}, total_cost_usd=0.1),
 ])
 tr = rca.parse_transcript(transcript)
+# files the (fake) model was shown by search/investigate in this run, besides the Read of CartServiceImpl.java above
+tr['results'] += '\n1. biz-mobile/src/CartScreen.tsx:1-4 [mobile/code]\n2. engineering-knowledge/handbook/pack.md:1-2 [docs/docs]\n3. Dup.java Uniq.java'
 assert len(tr['tool_uses']) == 2 and NR in tr['results'] and tr['final']['total_cost_usd'] == 0.1
 
 
@@ -265,6 +267,48 @@ sbare['evidence']['source_be']['detail'] = 'CartServiceImpl.java:40 gọi getUui
 sbare['rca']['code_location']['file'] = 'CartServiceImpl.java'
 rca.validate(sbare, tr, K)
 assert sbare['evidence']['source_be']['status'] == 'confirmed' and sbare['rca']['code_location']['verified'], sbare['_problems']
+
+# --- a file in a docs repo is documentation, never the location of a defect (spec-to-test "aspire-docs" trap) ---
+(K / 'engineering-knowledge/handbook').mkdir(parents=True)
+(K / 'engineering-knowledge/handbook/pack.md').write_text('line1\nconst id = cart.warehouse.uuid;\n', encoding='utf-8')
+dl = make()
+dl['rca']['code_location'] = {'file': 'engineering-knowledge/handbook/pack.md', 'line_start': 2, 'line_end': 2, 'symbol': '',
+                              'snippet': 'cart.warehouse.uuid', 'ref': ''}
+rca.validate(dl, tr, K, {'mono-backend': 'be', 'engineering-knowledge': 'docs'})
+assert not dl['rca']['code_location']['verified'] and any('repo tài liệu' in p for p in dl['_problems'])
+assert rca.verdict(dl) == '?' and 'code_location' in rca.gate_failures(dl)
+dok = make()                                     # the same claim in a real code repo is unaffected
+rca.validate(dok, tr, K, {'mono-backend': 'be', 'engineering-knowledge': 'docs'})
+assert dok['rca']['code_location']['verified'] and rca.verdict(dok) == 'C'
+
+# --- a cited file must have been shown to the model in THIS run (search / investigate / Read), never remembered or invented ---
+unseen = make()
+unseen['rca']['code_location']['file'] = 'mono-backend/java/order/CartServiceImpl.java'
+quiet = rca.parse_transcript('')                                         # run in which nothing was searched or read
+rca.validate(unseen, quiet, K)
+assert not unseen['rca']['code_location']['verified'] and any('chưa xuất hiện' in p for p in unseen['_problems']), unseen['_problems']
+assert rca.verdict(unseen) == '?'
+seen_by_search = rca.parse_transcript(json.dumps({'type': 'user', 'message': {'content': [{'type': 'tool_result', 'content': [
+    {'type': 'text', 'text': '1. mono-backend/java/order/CartServiceImpl.java:36-41 [be/code] best line 40'}]}]}}))
+ok_seen = make()
+rca.validate(ok_seen, seen_by_search, K)
+assert ok_seen['rca']['code_location']['verified'], ok_seen['_problems']                  # shown by search: fine
+seen_by_read = rca.parse_transcript(json.dumps({'type': 'assistant', 'message': {'content': [
+    {'type': 'tool_use', 'name': 'Read', 'input': {'file_path': 'C:/x/knowledge/mono-backend/java/order/CartServiceImpl.java'}}]}}))
+ok_read = make()
+rca.validate(ok_read, seen_by_read, K)
+assert ok_read['rca']['code_location']['verified'], ok_read['_problems']                  # opened with Read: fine
+
+# --- a code candidate without a runtime signal says so (an error code can be thrown from several handlers) ---
+nr = make()
+rca.validate(nr, tr, K)
+nr['_versions'] = {}
+assert 'chưa có dấu hiệu runtime khớp' not in '\n'.join(rca.render_rca(nr, know, K, confirmed=True))
+nr2 = make()
+nr2['rca']['decisive_signal']['quote'] = 'a line that no tool ever returned'
+rca.validate(nr2, tr, K)
+nr2['_versions'] = {}
+assert 'chưa có dấu hiệu runtime khớp' in '\n'.join(rca.render_rca(nr2, know, K, confirmed=False))
 
 # --- loose comparison: quotes / backslashes / whitespace do not matter (they break the model's JSON, so it is told to drop them) ---
 assert rca.loose(' a "b" \\ x `c` ') == 'abxc' and rca.loose("it's") == 'its'

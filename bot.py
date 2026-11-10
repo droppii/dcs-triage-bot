@@ -55,6 +55,8 @@ VERIFIER = CFG.get('verifier', {})
 ATTACH = CFG.get('attachments', {})
 PRIOR = CFG.get('prior_art', {})
 USAGE = {'ledger': True, 'field': '', **CFG.get('usage', {})}
+INDEX = {'enabled': False, 'db': 'knowledge/_index/code.sqlite', **CFG.get('index', {})}
+INDEX_DB = ROOT / INDEX['db']                                # built by tools/setup.sh / tools/code_index.py build
 
 TYPE_LABEL = {'A': 'A - Tra cứu', 'B': 'B - Cách dùng/Đúng thiết kế', 'C': 'C - Bug', 'D': 'D - Chỉnh dữ liệu',
               'E': 'E - Đề xuất', '?': '? - Không chắc'}
@@ -85,6 +87,7 @@ READ_TOOLS = (
     [f'{tool}({perm_path(p)}/**)' for tool in ('Read', 'Grep', 'Glob') for p in READ_DIRS]
     + ['mcp__dbhub']  # DBHub itself enforces readonly=true, max 100 rows, 15s
     + ['mcp__repogit']  # tools/repo_git_mcp.py: fixed read-only git log/blame/show/head on the knowledge clones
+    + (['mcp__codeindex'] if INDEX['enabled'] else [])  # tools/code_index.py serve: search / investigate over the pre-built code index
     + ['mcp__sentry__' + t for t in (
         'find_organizations find_projects find_releases get_release_details get_issue_details get_event_stacktrace '
         'get_issue_breadcrumbs get_issue_tag_values get_trace_details get_span_details get_sentry_resource '
@@ -246,6 +249,9 @@ def mcp_config():
         'dbhub': {'type': 'stdio', 'command': sys.executable, 'args': ['-I', str(ROOT / 'tools/dbhub-stg.py')]},
         'repogit': {'type': 'stdio', 'command': sys.executable,
                     'args': ['-I', str(ROOT / 'tools/repo_git_mcp.py'), '--root', str(KNOWLEDGE_DIR)]},
+        **({'codeindex': {'type': 'stdio', 'command': sys.executable,
+                          'args': ['-I', str(ROOT / 'tools/code_index.py'), 'serve', '--db', str(INDEX_DB), '--root', str(KNOWLEDGE_DIR)]}}
+           if INDEX['enabled'] else {}),
     }})
 
 

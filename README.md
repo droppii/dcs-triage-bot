@@ -81,6 +81,7 @@ Gói cho người trực (loại C hoặc ứng viên chưa đủ bằng chứng
 | `tests/` | Test logic, không gọi mạng; `python3 tests/run_all.py` chạy tất cả |
 | `tools/setup.sh` | Clone tri thức (chỉ đọc, kèm lịch sử git có giới hạn) + sinh chỉ mục + cài DBHub |
 | `tools/gen_anchors.py`, `tools/anchors_client.py` | Sinh `knowledge/_anchors/`: backend (service, route → handler, mã lỗi, bảng, SHA đã clone) và client (chuỗi UI, lời gọi API, màn hình, cạnh client → backend, mã lỗi ↔ chuỗi UI) |
+| `tools/code_index.py` | Chỉ mục mã nguồn (SQLite FTS5) và MCP `codeindex`: `build`, `search`, `investigate`, `serve` |
 | `tools/repo_git_mcp.py` | MCP git chỉ đọc (`git_head/log/blame/show/tags/file`; `ref` để đọc code đúng phiên bản app) cho các bản clone |
 | `tools/eval.py` | Chạy case N lần, chấm điểm, so baseline |
 | `usage.py`, `tools/usage_report.py` | Ghi và tổng hợp token/chi phí mỗi lần phân tích |
@@ -137,6 +138,27 @@ Windows: dùng `python` thay `python3`; chạy `tools/setup.sh` bằng Git Bash.
 | `stg-voucher-no-code`, `stg-order-stuck-no-code` | (không điều tra) | Chỉ hỏi mã tham chiếu và thời điểm; ticket High vẫn chuyển người trực |
 
 Chi phí khoảng $0,03–0,7 mỗi ticket (sonnet). Cùng một case có thể ra kết luận khác nhau giữa các lần chạy, nên khi đánh giá cần chạy nhiều lần.
+
+## Chỉ mục mã nguồn: tra cứu thay vì đọc cả code (tiết kiệm token)
+
+Bot không quét hay đọc cả source code. `tools/code_index.py build` (chạy trong `tools/setup.sh`) tạo `knowledge/_index/code.sqlite` (SQLite FTS5, chỉ thư viện chuẩn): các đoạn 40 dòng của mọi repo đã clone, tách `camelCase`/`snake_case`, bỏ dấu tiếng Việt khi tìm. Bot gọi MCP `codeindex` (cấu hình `config.json` → `index`):
+
+- **`search`**: tra bằng chuỗi UI nguyên văn, mã/chuỗi lỗi, đường dẫn API, tên hàm hoặc bảng. Trả vài hit `repo/file:dòng` kèm trích đoạn ngắn, mỗi file một hit, xếp hạng BM25; truy vấn là một định danh thì nơi **định nghĩa** lên đầu. Gắn `type` (`code`, `docs`, `locale`), `layer`, và `STALE` nếu clone đã đổi sau lần build hoặc index cũ hơn 30 ngày.
+- **`investigate`**: một định danh → nơi định nghĩa, các file dùng nó, commit gần đây của file.
+- Sau đó model chỉ `Read` đúng đoạn quanh dòng của hit (`offset`/`limit`), không đọc cả file, không Grep cả thư mục.
+
+Cách làm lấy từ doc về cách Cerebro/Titan được dùng trong Heimdall (Stage A0): index sẵn, mỗi requirement vài lần `search`, `investigate` theo module, chỉ code mới là bằng chứng (tài liệu chỉ để định hướng, đường dẫn tài liệu có thể trông như đường dẫn code), hit cũ bị đánh dấu STALE, đường dẫn phải do chính tool trả về trong run đó. Bot kiểm tra điều cuối: `code_location` chỉ được xác nhận nếu tên file đã xuất hiện trong kết quả `search`/`investigate`/`Read` của run, và file đó không nằm trong repo tài liệu (`layer: docs`). Không có index thì bot quay về `_anchors/` và Grep.
+
+**Đo trên code thật (10/11/2026; 5 repo, 16.9k file, build 32 giây, index 181 MB):** mỗi truy vấn 18-170 ms và khoảng 600-750 token, định nghĩa của một định danh lên đầu. Cùng case `stg-voucher-ended`, model sonnet, cache nóng, mỗi cấu hình chỉ vài lần chạy nên chỉ là dấu hiệu, không phải thống kê:
+
+| Cấu hình | Lượt / tool | Token | Chi phí | Kết quả |
+|---|---|---|---|---|
+| Không index (Grep, Glob, Read) | 13 lượt, 10 tool | 1,38M | $0,32 | đúng `ClaimVoucherCommandHandler:73-76` + bằng chứng New Relic |
+| Có index | 8 lượt, 6 tool | 0,76M | $0,16 | **sai handler** (`AddVoucherToWallet`), không có bằng chứng runtime |
+| Có index + luật "chọn handler theo API đang lỗi" | 17 lượt, 16 tool | 1,41M | $0,33 | đúng handler + bằng chứng runtime |
+| (cùng cấu hình, lần chạy khác) | 8 lượt, 7 tool | 0,60M | $0,13 | lại sai handler |
+
+Kết luận trung thực: index làm mỗi lần tra rẻ và nhanh, nhưng **không tự làm model điều tra kỹ hơn**. Khi dừng sớm ở hit đầu bảng, bot rẻ hơn nửa và sai (mã lỗi 4064 được ném ở nhiều handler). Hai chốt chặn đã có: cổng kết luận vẫn chặn (verdict `?`, ứng viên ghi rõ "CHƯA đủ bằng chứng" kèm cảnh báo "chưa có dấu hiệu runtime khớp, chưa chắc là nơi đã chạy"), và luật 6 trong `RULES.md` bắt lấy `request.uri` của API đang lỗi để chọn handler. Chi phí của lần chạy đầu sau một thời gian nghỉ cao hơn nhiều (cache chưa nóng: tool của New Relic, Sentry, Bugsnag nặng khoảng 150k token ghi cache), nên đừng so chi phí giữa các lần chạy khác trạng thái cache. Cần chạy `tools/eval.py --runs 5` trên các case có đáp án để biết tỷ lệ đúng thật sự.
 
 ## Backend nhiều repo, web và mobile
 

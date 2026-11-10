@@ -123,6 +123,11 @@
     "ledger": true,
     "field": ""
   },
+  "index": {
+    "note": "Chỉ mục mã nguồn cục bộ (SQLite FTS5) để bot tra cứu thay vì Grep + đọc cả file: xem tools/code_index.py. Build bằng tools/setup.sh (hoặc python3 tools/code_index.py build). Tắt = bot chỉ dùng Grep/Read.",
+    "enabled": true,
+    "db": "knowledge/_index/code.sqlite"
+  },
   "poll_seconds": 60,
   "card_wait_minutes": 3,
   "claude_timeout_seconds": 900,

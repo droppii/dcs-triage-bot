@@ -35,4 +35,5 @@ done
 
 (cd tools/dbhub && npm ci --ignore-scripts --no-audit --no-fund --silent)
 python3 -I tools/gen_anchors.py
+python3 -I tools/code_index.py build --knowledge knowledge --config config.json
 echo "done. Next: cp .env.example .env and fill it; see README 'Chạy thử'."

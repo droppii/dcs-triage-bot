@@ -73,6 +73,13 @@ def parse_transcript(text):
     return {'tool_uses': uses, 'results': '\n'.join(results), 'final': final}
 
 
+def seen_in_run(tr):
+    """Everything the model was shown or asked to open in this run: tool results + tool inputs (Read paths, queries)."""
+    if 'seen' not in tr:
+        tr['seen'] = tr['results'] + '\n' + json.dumps([u['input'] for u in tr['tool_uses']], ensure_ascii=False)
+    return tr['seen']
+
+
 def _used(tr, prefix):
     return any(u['name'].startswith(prefix) for u in tr['tool_uses'])
 
@@ -196,6 +203,9 @@ def validate(out, tr, kdir, layers=None):
                                             at=(loc.get('ref') or '').strip())
         if not loc_ok:
             problems.append('code_location: ' + why)
+        elif Path(loc['file']).name not in seen_in_run(tr):   # a path nobody showed the model is a path it made up (or remembered)
+            loc_ok = False
+            problems.append(f"code_location: {Path(loc['file']).name} chưa xuất hiện trong kết quả tool của run này (search/investigate/Read)")
     loc['verified'] = loc_ok
     rca['code_location'] = loc
 
@@ -213,6 +223,9 @@ def validate(out, tr, kdir, layers=None):
             if claim in CODE_LAYERS and claim != derived:
                 problems.append(f'layer: model nói {claim} nhưng dòng code ở repo {repo} (lớp {derived}); bot dùng {derived}')
             rca['layer'] = derived
+        elif derived == 'docs':  # a README / handbook path looks like a code path (the "aspire-docs" trap): never a defect location
+            loc['verified'] = False
+            problems.append(f'code_location: {repo} là repo tài liệu, không phải code; không dùng làm vị trí lỗi')
     rca['layer_derived'] = derived
 
     # source_be: every path:line cited must be real
@@ -346,6 +359,10 @@ def render_rca(out, knowledge, kdir, confirmed):
         L.append(f"  > {norm(sig.get('quote'))[:300]}")
     elif sig.get('observed'):
         L.append('- Dấu hiệu runtime: model nêu nhưng bot KHÔNG tìm thấy câu trích trong kết quả tool (bỏ qua)')
+    if loc.get('verified') and not sig.get('verified'):
+        # the index says where code IS, not which code RAN: one error code is often thrown from several handlers
+        L.append('- Lưu ý: chưa có dấu hiệu runtime khớp sự cố này, nên vị trí code trên mới là nơi có thể gây lỗi, chưa chắc là nơi đã chạy '
+                 '(cùng một mã lỗi có thể được ném ở nhiều handler). Đối chiếu với API đang lỗi trước khi sửa.')
     if norm(rca.get('client_version')):
         L.append(f"- Phiên bản client: {norm(rca['client_version'])}")
     if norm(rca.get('mechanism')):
