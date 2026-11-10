@@ -213,7 +213,7 @@ def validate(out, tr, kdir, layers=None):
             problems.append('code_location: ' + why)
         elif Path(loc['file']).name not in seen_in_run(tr):   # a path nobody showed the model is a path it made up (or remembered)
             loc_ok = False
-            problems.append(f"code_location: {Path(loc['file']).name} chưa xuất hiện trong kết quả tool của run này (search/investigate/Read)")
+            problems.append(f"code_location: {Path(loc['file']).name} chưa xuất hiện trong kết quả tool của run này (Grep/Read)")
     loc['verified'] = loc_ok
     rca['code_location'] = loc
 

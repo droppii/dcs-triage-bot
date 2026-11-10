@@ -42,7 +42,7 @@ transcript = '\n'.join([
     ev('result', is_error=False, structured_output={}, total_cost_usd=0.1),
 ])
 tr = rca.parse_transcript(transcript)
-# files the (fake) model was shown by search/investigate in this run, besides the Read of CartServiceImpl.java above
+# files the (fake) model was shown by Grep in this run, besides the Read of CartServiceImpl.java above
 tr['results'] += '\n1. biz-mobile/src/CartScreen.tsx:1-4 [mobile/code]\n2. engineering-knowledge/handbook/pack.md:1-2 [docs/docs]\n3. Dup.java Uniq.java'
 assert len(tr['tool_uses']) == 2 and NR in tr['results'] and NR in tr['runtime'] and 'static code read' not in tr['runtime'] and tr['final']['total_cost_usd'] == 0.1
 
@@ -295,7 +295,7 @@ assert rt_sig['rca']['decisive_signal']['verified'] and rca.verdict(rt_sig) == '
 unlinked = rca.parse_transcript(json.dumps({'type': 'user', 'message': {'content': [{'type': 'tool_result', 'content': NR}]}}))
 assert unlinked['runtime'] == ''                                                   # a result we cannot attribute to a runtime tool is static
 
-# --- a cited file must have been shown to the model in THIS run (search / investigate / Read), never remembered or invented ---
+# --- a cited file must have been shown to the model in THIS run (Grep / Read), never remembered or invented ---
 unseen = make()
 unseen['rca']['code_location']['file'] = 'mono-backend/java/order/CartServiceImpl.java'
 quiet = rca.parse_transcript('')                                         # run in which nothing was searched or read

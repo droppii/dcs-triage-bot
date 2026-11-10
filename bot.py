@@ -55,8 +55,6 @@ VERIFIER = CFG.get('verifier', {})
 ATTACH = CFG.get('attachments', {})
 PRIOR = CFG.get('prior_art', {})
 USAGE = {'ledger': True, 'field': '', **CFG.get('usage', {})}
-INDEX = {'enabled': False, 'db': 'knowledge/_index/code.sqlite', **CFG.get('index', {})}
-INDEX_DB = ROOT / INDEX['db']                                # built by tools/setup.sh / tools/code_index.py build
 
 TYPE_LABEL = {'A': 'A - Tra cứu', 'B': 'B - Cách dùng/Đúng thiết kế', 'C': 'C - Bug', 'D': 'D - Chỉnh dữ liệu',
               'E': 'E - Đề xuất', '?': '? - Không chắc'}
@@ -87,7 +85,6 @@ READ_TOOLS = (
     [f'{tool}({perm_path(p)}/**)' for tool in ('Read', 'Grep', 'Glob') for p in READ_DIRS]
     + ['mcp__dbhub']  # DBHub itself enforces readonly=true, max 100 rows, 15s
     + ['mcp__repogit']  # tools/repo_git_mcp.py: fixed read-only git log/blame/show/head on the knowledge clones
-    + (['mcp__codeindex'] if INDEX['enabled'] else [])  # tools/code_index.py serve: search / investigate over the pre-built code index
     + ['mcp__sentry__' + t for t in (
         'find_organizations find_projects find_releases get_release_details get_issue_details get_event_stacktrace '
         'get_issue_breadcrumbs get_issue_tag_values get_trace_details get_span_details get_sentry_resource '
@@ -251,17 +248,14 @@ def mcp_config(servers=None):
         'dbhub': {'type': 'stdio', 'command': sys.executable, 'args': ['-I', str(ROOT / 'tools/dbhub-stg.py')]},
         'repogit': {'type': 'stdio', 'command': sys.executable,
                     'args': ['-I', str(ROOT / 'tools/repo_git_mcp.py'), '--root', str(KNOWLEDGE_DIR)]},
-        **({'codeindex': {'type': 'stdio', 'command': sys.executable,
-                          'args': ['-I', str(ROOT / 'tools/code_index.py'), 'serve', '--db', str(INDEX_DB), '--root', str(KNOWLEDGE_DIR)]}}
-           if INDEX['enabled'] else {}),
     }
     return json.dumps({'mcpServers': {k: v for k, v in full.items() if servers is None or k in servers}})
 
 
 def product_servers(product):
-    """MCP servers a ticket of this Product needs: the common set (New Relic for the API layer, DB, git, code index) plus the client
+    """MCP servers a ticket of this Product needs: the common set (New Relic for the API layer, DB, git) plus the client
     error tracker of the Product (Bugsnag for the mobile apps, Sentry for web-mall). Unknown Product: every tracker."""
-    base = list(CFG.get('mcp_default', ['newrelic', 'dbhub', 'repogit', 'codeindex']))
+    base = list(CFG.get('mcp_default', ['newrelic', 'dbhub', 'repogit']))
     pm = {k.casefold(): v for k, v in ((CFG.get('products') or {}).get('map') or {}).items()}
     entry = pm.get(str(product or '').strip().casefold())
     extra = entry.get('mcp', []) if entry else CFG.get('mcp_unknown_product', ['sentry', 'bugsnag'])
@@ -477,7 +471,7 @@ def run_verifier(out, label):
     try:
         log = run_claude(prompt, rules('agent/VERIFIER.md'), 'agent/verifier_schema.json', f'{label}-verify',
                          VERIFIER.get('model') or MODEL, role='verifier',
-                         servers=[x for x in ('newrelic', 'repogit', 'codeindex') if x in json.loads(mcp_config())['mcpServers']])
+                         servers=[x for x in ('newrelic', 'repogit') if x in json.loads(mcp_config())['mcpServers']])
         res, _ = structured_result(log)
         v = res['structured_output']
         v['_cost'] = res.get('total_cost_usd')

@@ -106,8 +106,7 @@
   "mcp_default": [
     "newrelic",
     "dbhub",
-    "repogit",
-    "codeindex"
+    "repogit"
   ],
   "mcp_unknown_product": [
     "sentry",
@@ -148,11 +147,6 @@
     "note": "Mỗi lần phân tích ghi token + chi phí ước tính (giá niêm yết) vào AI Note và logs/usage.jsonl. Tổng hợp: python3 tools/usage_report.py. 'field' = tên cột Base riêng cho token (để trống = chỉ ghi vào AI Note).",
     "ledger": true,
     "field": ""
-  },
-  "index": {
-    "note": "TẮT mặc định: đo 10/11 cho thấy có/không index cho cùng độ đúng và chi phí (xem README mục 'Chi phí'). Chỉ mục mã nguồn cục bộ (SQLite FTS5): tools/code_index.py. Bật lại cho repo FE/mobile lớn nếu đo được lợi ích. Build bằng tools/setup.sh.",
-    "enabled": false,
-    "db": "knowledge/_index/code.sqlite"
   },
   "poll_seconds": 60,
   "card_wait_minutes": 3,
