@@ -1,0 +1,23 @@
+{
+ "_readme": "Mẫu case BUG có đáp án, dựng từ một bug Jira đã đóng có PR fix. Đáp án code_location lấy từ diff của PR (dòng bị sửa). Đổi tên file bỏ dấu _ để eval chạy. Chỉ dùng dữ liệu staging đã dựng lại bằng tools/stg_case.py, không chép dữ liệu production.",
+ "ticket": {
+  "Title": "...",
+  "Description": "Mô tả như người vận hành báo: mã tham chiếu + giờ gần đúng, KHÔNG nêu nguyên nhân.",
+  "Priority": "High",
+  "Product": "Biz App",
+  "Feature": "...",
+  "ReportedBy": "QA test"
+ },
+ "expect": {
+  "verdict_any_of": ["C"],
+  "code_location": {"file_suffix": "TênFile.java", "line_range": [100, 110]},
+  "must_contain": ["chuỗi lỗi nguyên văn", "TênHàm"],
+  "forbidden_conclusions": ["giả thuyết hiển nhiên nhưng SAI (sentinel): người báo hay đội vận hành thường nghi cái này"],
+  "sentinel": true,
+  "max_tool_calls": 60,
+  "max_cost_usd": 1.5,
+  "ground_truth": {"jira": "BUG-123", "fix_pr": "https://github.com/droppii/mono-backend/pull/...", "root_cause": "1-2 câu: vì sao vỡ", "fixed_in_branch_after": "YYYY-MM-DD"},
+  "valid_until": "YYYY-MM-DD (New Relic giữ ~30 ngày; sau đó dùng evals/fixtures qua --from-fixtures)"
+ },
+ "created": "YYYY-MM-DD"
+}

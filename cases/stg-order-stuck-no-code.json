@@ -13,7 +13,8 @@
    "mã đơn",
    "thời điểm bắt đầu kẹt"
   ],
-  "routed_to_oncall": true
+  "routed_to_oncall": true,
+  "missing_info": true
  },
  "created": "2026-11-06"
 }

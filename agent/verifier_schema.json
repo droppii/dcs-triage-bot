@@ -1,0 +1,18 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "holes", "alternatives_checked"],
+  "properties": {
+    "verdict": {"type": "string", "enum": ["PASS", "FAIL"]},
+    "holes": {"type": "array", "items": {"type": "string"}},
+    "alternatives_checked": {
+      "type": "array",
+      "items": {"type": "object", "additionalProperties": false, "required": ["claim", "distinguishing_artifact", "checked", "result"],
+        "properties": {
+          "claim": {"type": "string"},
+          "distinguishing_artifact": {"type": "string"},
+          "checked": {"type": "boolean"},
+          "result": {"type": "string"}}}
+    }
+  }
+}

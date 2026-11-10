@@ -19,7 +19,20 @@
    "hỏi vận hành tên kho/địa chỉ/tỉnh"
   ],
   "routed_to_oncall": true,
-  "data_note": "Dữ liệu tạo bằng tools/stg_case.py (cart nhudoan01) nên request có User-Agent droppii-qa-dcs-bot-test."
+  "data_note": "Dữ liệu tạo bằng tools/stg_case.py (cart nhudoan01) nên request có User-Agent droppii-qa-dcs-bot-test.",
+  "verdict_any_of": [
+   "?",
+   "C"
+  ],
+  "must_contain": [
+   "NullPointerException",
+   "CartServiceImpl"
+  ],
+  "code_location": {
+   "file_suffix": "CartServiceImpl.java"
+  },
+  "max_tool_calls": 60,
+  "goal": "Mục tiêu: C kèm dòng code gây NPE. \"?\" kèm ứng viên đúng vẫn được 0.5 nếu thiếu dấu hiệu quyết định."
  },
  "created": "2026-11-06"
 }

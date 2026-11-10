@@ -17,7 +17,14 @@
   "must_not": [
    "hỏi vận hành mã đơn/thời điểm"
   ],
-  "known_variance": "Hai lần chạy 06/11 ra kết luận khác nhau (lệch / chưa tái hiện): chạy nhiều lần khi đánh giá."
+  "known_variance": "Hai lần chạy 06/11 ra kết luận khác nhau (lệch / chưa tái hiện): chạy nhiều lần khi đánh giá.",
+  "verdict_any_of": [
+   "?"
+  ],
+  "must_contain": [
+   "stock_quant"
+  ],
+  "max_tool_calls": 60
  },
  "created": "2026-11-06"
 }
