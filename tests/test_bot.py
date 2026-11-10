@@ -48,8 +48,14 @@ assert 'High → Medium' in r and '**Giao cho:** Dev C' in r and '<at' not in r 
 assert 'Giao cho' not in bot.compose_reply({**out, 'missing_info': ['mã đơn']}, {'Priority': ['High']}, 'Dev C', 'BA D')
 assert bot.bot_fields(out, 'Đã chuyển người')['AI Type'] == ['C - Bug']
 
-# 100% gate (dev rule): one step not confirmed -> no conclusion, routed to on-call, Base shows '?'
-weak = {**out, 'type': 'B', 'evidence': {**ok3, 'newrelic': {'status': 'not_found', 'detail': 'log hết hạn'}}}
+# A/B need code + DB only: a by-design answer is a formula + data, New Relic proves nothing more (D1110-011)
+by_design = {**out, 'type': 'B', 'evidence': {**ok3, 'newrelic': {'status': 'not_checked', 'detail': ''}}}
+assert bot.verdict(by_design) == 'B'
+assert bot.verdict({**by_design, 'evidence': {**ok3, 'db': {'status': 'not_checked', 'detail': ''},
+                                              'newrelic': {'status': 'not_checked', 'detail': ''}}}) == '?'  # DB still required
+
+# 100% gate (dev rule) still holds for D: one step not confirmed -> no conclusion, routed to on-call, Base shows '?'
+weak = {**out, 'type': 'D', 'evidence': {**ok3, 'newrelic': {'status': 'not_found', 'detail': 'log hết hạn'}}}
 assert bot.verdict(weak) == '?'
 r = bot.compose_reply(weak, {'Priority': ['High']}, 'Dev C', 'BA D')
 assert '**Loại:** `? - Không chắc`' in r and '**New Relic:** `✗ không thấy`' in r and '**Giao cho:** Dev C' in r, r
