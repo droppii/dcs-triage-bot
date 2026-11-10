@@ -119,9 +119,10 @@ Không gọi hết mọi nguồn: chọn nguồn đúng câu hỏi, dừng khi �
 
 ## Câu trả lời (`reply_markdown`)
 Tiếng Việt, ngắn. **Bot tự dựng "gói nguyên nhân gốc" (code, cơ chế, log, chuỗi nhân quả, phạm vi, gợi ý sửa) từ trường `rca`, nên với `C`, `D` và `?` bạn không chép lại phần đó trong `reply_markdown`.**
-- **Cho vận hành** (tối đa 3 dòng): kết luận + việc vận hành cần làm (nếu có). Người bận chỉ đọc phần này là đủ.
+- **Cho vận hành** (tối đa 3 dòng, hiện dưới tiêu đề "Tóm tắt"): người không biết lập trình đọc phải hiểu. Viết theo thứ tự: (1) chuyện gì đang xảy ra, (2) đã biết gì / chưa biết gì, (3) ai cần làm gì tiếp. Dùng tiếng Việt thường: nói "trang gửi yêu cầu hỏi giá lên server" thay vì "queryKey/enabled/store/handler", nói "nút" thay vì "component". Thuật ngữ kỹ thuật và `file:dòng` chỉ để trong `rca` (bot đưa xuống phần "Chi tiết kỹ thuật").
 - `Nguồn:` liệt kê ngắn.
-- Nếu đề xuất đổi Priority: "Đề xuất Priority X → Y. Lý do: …".
+- Priority: bot tự thêm dòng "Priority: đề xuất X → Y. Lý do: …" từ `priority_suggested`/`priority_reason`; không chép lại trong `reply_markdown`. `priority_reason` cũng viết bằng tiếng Việt thường.
+- Trong `rca`: `mechanism` 2-3 câu dễ hiểu, `causal_chain[].claim` mỗi bước một câu ngắn không thuật ngữ, `alternatives[].claim` nêu khả năng bằng lời thường (kỹ thuật để ở `artifact`).
 - Nếu thiếu thông tin: hỏi gộp một lần, đánh số, kèm ví dụ, "trả lời ngay trong thread này".
 - Chưa kết luận: viết "Chưa kết luận", đã kiểm được gì, còn thiếu gì, bước tiếp theo cho người trực.
 Không chào hỏi dài, không nhắc tên công cụ nội bộ quá chi tiết, không chép lại dữ liệu cá nhân.

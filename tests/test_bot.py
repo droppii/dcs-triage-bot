@@ -44,7 +44,7 @@ rca_ok = {'code_location': {'file': 'x.java', 'line_start': 1, 'line_end': 1, 's
 out = {'type': 'C', 'confidence': 0.8, 'evidence': ok3, 'rca': rca_ok, 'priority_suggested': 'Medium', 'priority_reason': '1 đơn',
        'missing_info': [], 'reply_markdown': 'Lỗi do X.', 'sources': ['nr'], 'summary': 's', '_log': 'l'}
 r = bot.compose_reply(out, {'Priority': ['High']}, 'Dev C', 'BA D')
-assert 'High → Medium' in r and 'Chuyển: Dev C' in r and '<at' not in r and 'C - Bug' in r, r
+assert 'High → Medium' in r and '**Chuyển:** Dev C' in r and '<at' not in r and 'C - Bug' in r, r
 assert 'Chuyển' not in bot.compose_reply({**out, 'missing_info': ['mã đơn']}, {'Priority': ['High']}, 'Dev C', 'BA D')
 assert bot.bot_fields(out, 'Đã chuyển người')['AI Type'] == ['C - Bug']
 
@@ -52,7 +52,7 @@ assert bot.bot_fields(out, 'Đã chuyển người')['AI Type'] == ['C - Bug']
 weak = {**out, 'type': 'B', 'evidence': {**ok3, 'newrelic': {'status': 'not_found', 'detail': 'log hết hạn'}}}
 assert bot.verdict(weak) == '?'
 r = bot.compose_reply(weak, {'Priority': ['High']}, 'Dev C', 'BA D')
-assert 'Loại: ? - Không chắc' in r and 'New Relic ✗ không thấy' in r and 'Chuyển: Dev C' in r, r
+assert '**Loại:** `? - Không chắc`' in r and '**New Relic:** `✗ không thấy`' in r and '**Chuyển:** Dev C' in r, r
 assert bot.bot_fields(weak, 'Đã chuyển người')['AI Type'] == ['? - Không chắc']
 assert bot.verdict({**weak, 'type': 'E'}) == 'E'  # feature requests go to PO/BA, no investigation gate
 
@@ -207,12 +207,12 @@ print('ok fail path')
 
 # checklist is shown even when the model itself picked '?'
 r = bot.compose_reply({**weak, 'type': '?'}, {'Priority': ['High']}, 'Dev C', 'BA D')
-assert 'Đã kiểm: Code BE ✓' in r, r
+assert '**Code BE:** `✓`' in r and '**ĐÃ KIỂM:**' in r, r
 print('ok gate')
 
 # High ticket is routed to on-call even while waiting for the reporter; non-High waits
 hi = {**weak, 'type': '?', 'missing_info': ['mã đơn'], 'priority_suggested': 'High'}
-assert 'Chuyển: Dev C' in bot.compose_reply(hi, {'Priority': ['High']}, 'Dev C', 'BA D')
+assert '**Chuyển:** Dev C' in bot.compose_reply(hi, {'Priority': ['High']}, 'Dev C', 'BA D')
 assert 'Chuyển' not in bot.compose_reply({**hi, 'priority_suggested': 'Low'}, {'Priority': ['Low']}, 'Dev C', 'BA D')
 print('ok high routing')
 

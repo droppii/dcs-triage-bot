@@ -125,8 +125,8 @@ o['_versions'] = {'mono-backend': {'sha': 'a' * 40, 'branch': 'dev', 'date': '20
 know = [{'name': 'mono-backend', 'url': 'https://github.com/droppii/mono-backend.git', 'branch': 'dev'}]
 text = '\n'.join(rca.render_rca(o, know, K, confirmed=True))
 assert 'https://github.com/droppii/mono-backend/blob/' + 'a' * 40 + '/java/order/CartServiceImpl.java#L40' in text, text
-assert 'Nguyên nhân gốc' in text and 'Cơ chế' in text and 'getUuid' in text and 'mono-backend@aaaaaaaa' in text
-assert 'Ứng viên' in '\n'.join(rca.render_rca(o, know, K, confirmed=False))
+assert 'NGUYÊN NHÂN GỐC' in text and '**Cơ chế:**' in text and 'getUuid' in text and 'mono-backend@aaaaaaaa' in text
+assert 'ỨNG VIÊN NGUYÊN NHÂN' in '\n'.join(rca.render_rca(o, know, K, confirmed=False))
 # versions list every clone; only the repos the RCA cites may appear as "đã dẫn"
 o['_versions']['web-mall'] = {'sha': 'b' * 40, 'branch': 'main', 'date': '2026-11-09'}
 text = '\n'.join(rca.render_rca(o, know, K, confirmed=True))
@@ -143,8 +143,8 @@ try:
     r = bot.compose_reply(o, {'Priority': ['High']}, 'Dev C', 'BA D')
 finally:
     bot.KNOWLEDGE_DIR = old_k
-assert 'Loại: ? - Không chắc' in r and 'Ứng viên nguyên nhân' in r and 'CartServiceImpl.java:40' in r and 'Chuyển: Dev C' in r, r
-assert 'đã loại giả thuyết khác ✗' in r, r
+assert '**Loại:** `? - Không chắc`' in r and 'ỨNG VIÊN NGUYÊN NHÂN' in r and 'CartServiceImpl.java:40' in r and '**Chuyển:** Dev C' in r, r
+assert '**Đã loại giả thuyết khác:** `✗`' in r, r
 
 # --- bot.finalize_log: a saved transcript -> verified result (same path eval --from-log uses) ---
 good = make()
@@ -158,7 +158,7 @@ try:
     fin = bot.finalize_log(logf, versions={'mono-backend': {'sha': 'b' * 40, 'branch': 'dev', 'date': '2026-11-09'}})
     assert bot.verdict(fin) == 'C' and fin['_cost'] == 0.2 and fin['_tool_calls'] == 2 and fin['_problems'] == []
     reply = bot.compose_reply(fin, {'Priority': ['High']}, 'Dev C', 'BA D')
-    assert 'Nguyên nhân gốc' in reply and 'blob/' + 'b' * 40 in reply and 'Loại: C - Bug' in reply, reply
+    assert 'NGUYÊN NHÂN GỐC' in reply and 'blob/' + 'b' * 40 in reply and '**Loại:** `C - Bug`' in reply, reply
     assert 'code: mono-backend/java/order/CartServiceImpl.java:40' in bot.bot_fields(fin, 'Đã chuyển người')['AI Note']
     # a run that crashed has no structured output -> raises (bot.fail() then hands the ticket to on-call)
     bad_log = logf.with_name('bad.jsonl')
@@ -252,7 +252,7 @@ rca.validate(o, tr, K, LAYERS)
 o['_versions'] = {'biz-mobile': {'sha': 'c' * 40, 'branch': 'main', 'date': '2026-11-09'}}
 know2 = know + [{'name': 'biz-mobile', 'url': 'https://github.com/droppii/biz-mobile.git', 'branch': 'main'}]
 text = '\n'.join(rca.render_rca(o, know2, K, confirmed=True))
-assert 'Lớp lỗi: mobile (code đọc ở v3.12.0)' in text and 'Phiên bản client: Biz Mobile 3.12.0' in text, text
+assert '**Lớp lỗi:** `mobile` (code đọc ở v3.12.0)' in text and '**Phiên bản client:** Biz Mobile 3.12.0' in text, text
 assert 'https://github.com/droppii/biz-mobile/blob/v3.12.0/src/CartScreen.tsx#L2' in text, text
 assert 'phiên bản app/bundle' == rca.CHECK_LABEL['client_version']
 

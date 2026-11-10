@@ -345,70 +345,81 @@ def _fence(snippet, limit=6):
     return ['```', *lines, '```'] if lines else []
 
 
+def _plain(x):
+    """Keep model text from breaking the bold/italic/code markup around it."""
+    return norm(x).replace('*', '').replace('`', "'")
+
+
 def render_rca(out, knowledge, kdir, confirmed):
-    """The investigation package for on-call, built from verified fields (the model's prose is not used)."""
+    """The investigation package for on-call, built from verified fields (the model's prose is not used).
+    Same form as the Jira triage cards: UPPERCASE section title, then "- **Label:** `value` — *reason*" bullets.
+    Order: cause (what and why), what on-call should do, technical detail for whoever fixes it."""
     rca = out.get('rca') or {}
     versions = out.get('_versions') or {}
-    head = ('**Nguyên nhân gốc (bot đã đối chiếu code và log):**' if confirmed
-            else '**Ứng viên nguyên nhân (CHƯA đủ bằng chứng, người trực kiểm tra):**')
-    L = [head]
+    chain = rca.get('causal_chain') or []
     loc = rca.get('code_location') or {}
+    sig = rca.get('decisive_signal') or {}
+    L = ['**NGUYÊN NHÂN GỐC (bot đã đối chiếu code và log):**' if confirmed
+         else '**ỨNG VIÊN NGUYÊN NHÂN (CHƯA đủ bằng chứng, người trực kiểm tra):**']
+    if norm(rca.get('mechanism')):
+        L.append(f"- **Cơ chế:** {_plain(rca['mechanism'])}")
     if loc.get('verified'):
         path = resolve_path(loc['file'], kdir)
         rng = f"{loc['line_start']}-{loc['line_end']}" if loc['line_end'] != loc['line_start'] else str(loc['line_start'])
         link = permalink(path, loc['line_start'], loc['line_end'], versions, knowledge, kdir, loc.get('ref') or '') if path else ''
         name = f"{loc['file']}:{rng}"
-        L.append(f"- Code: {'[' + name + '](' + link + ')' if link else '`' + name + '`'}"
+        L.append(f"- **Vị trí code:** {'[' + name + '](' + link + ')' if link else '`' + name + '`'}"
                  + (f" · `{loc['symbol']}`" if loc.get('symbol') else ''))
         L += ['  ' + x for x in _fence(loc.get('snippet'))]
-        layer = rca.get('layer')
-        if layer and layer != 'unknown':
-            L.append(f"- Lớp lỗi: {layer}" + (f" (code đọc ở {loc['ref']})" if loc.get('ref') else ''))
-    sig = rca.get('decisive_signal') or {}
     if sig.get('verified'):
-        L.append(f"- Dấu hiệu runtime: {sig.get('what', '')} — {sig.get('source', '')} {sig.get('at', '')}".rstrip())
+        L.append(f"- **Dấu hiệu runtime:** {_plain(sig.get('what', ''))} — *{_plain(sig.get('source', ''))} {_plain(sig.get('at', ''))}*".rstrip())
         L.append(f"  > {norm(sig.get('quote'))[:300]}")
     elif sig.get('observed'):
-        L.append('- Dấu hiệu runtime: model nêu nhưng bot KHÔNG tìm thấy câu trích trong kết quả tool (bỏ qua)')
+        L.append('- **Dấu hiệu runtime:** model nêu nhưng bot KHÔNG tìm thấy câu trích trong kết quả tool (bỏ qua)')
     if loc.get('verified') and not sig.get('verified'):
         # the index says where code IS, not which code RAN: one error code is often thrown from several handlers
-        L.append('- Lưu ý: chưa có dấu hiệu runtime khớp sự cố này, nên vị trí code trên mới là nơi có thể gây lỗi, chưa chắc là nơi đã chạy '
-                 '(cùng một mã lỗi có thể được ném ở nhiều handler). Đối chiếu với API đang lỗi trước khi sửa.')
-    if norm(rca.get('client_version')):
-        L.append(f"- Phiên bản client: {norm(rca['client_version'])}")
-    if norm(rca.get('mechanism')):
-        L.append(f"- Cơ chế: {norm(rca['mechanism'])}")
-    chain = rca.get('causal_chain') or []
+        L.append('- **Lưu ý:** *chưa có dấu hiệu runtime khớp sự cố này, nên vị trí code trên chỉ là nơi có thể gây lỗi, chưa chắc là nơi đã chạy. '
+                 'Đối chiếu với API đang lỗi trước khi sửa.*')
+    if rca.get('blast_radius'):
+        L.append('- **Phạm vi ảnh hưởng:** ' + '; '.join(_plain(x) for x in rca['blast_radius']))
+    if norm(rca.get('introduced_by')):
+        L.append(f"- **Đưa vào bởi:** {_plain(rca['introduced_by'])}")
     if chain:
-        L.append('- Chuỗi nhân quả:')
-        L += [f"  {i}. [{c.get('link')}] {c.get('claim')} ({c.get('artifact')})" for i, c in enumerate(chain, 1)]
+        L += ['', '**DIỄN BIẾN (TỪNG BƯỚC):**']
+        L += [f"{i}. {_plain(c.get('claim'))} — *{_plain(c.get('artifact'))}*" for i, c in enumerate(chain, 1)]
     alts = rca.get('alternatives') or []
     if alts:
         mark = {'refuted': '✗ đã loại', 'supported': '✓ còn nghi', 'unverified': '? chưa kiểm'}
-        L.append('- Đã xét: ' + '; '.join(f"{a.get('claim')} [{mark.get(a.get('status'), a.get('status'))}]" for a in alts))
-    if rca.get('blast_radius'):
-        L.append('- Phạm vi ảnh hưởng: ' + '; '.join(rca['blast_radius']))
-    if norm(rca.get('introduced_by')):
-        L.append(f"- Đưa vào bởi: {norm(rca['introduced_by'])}")
+        L += ['', '**CÁC KHẢ NĂNG ĐÃ XÉT:**']
+        L += [f"- **{_plain(a.get('claim'))}:** `{mark.get(a.get('status'), a.get('status'))}`" for a in alts]
+    todo = [f"- **{label}:** {_plain(rca[key])}" for key, label in
+            (('repro_steps', 'Cách tái hiện'), ('suggested_fix', 'Gợi ý sửa'),
+             ('failing_test_idea', 'Test đề xuất'), ('jira_title', 'Tiêu đề Jira gợi ý')) if norm(rca.get(key))]
+    if todo:
+        L += ['', '**VIỆC TIẾP THEO CHO NGƯỜI TRỰC:**'] + todo
+    if rca.get('could_not_confirm'):
+        L += ['', '**CHƯA XÁC NHẬN ĐƯỢC:**'] + [f"- {_plain(x)}" for x in rca['could_not_confirm']]
     # `versions` lists every clone, not what was read: show only repos the RCA actually cites (code_location / chain artifacts),
     # otherwise a ticket that read one repo is reported as having read all twelve.
     cited_txt = ' '.join([str(loc.get('file') or '')] + [str(c.get('artifact') or '') for c in chain])
     versions_txt = ', '.join(f"{r}@{v['sha'][:8]} ({v.get('branch', '?')}, {v.get('date', '?')})"
                              for r, v in versions.items()
                              if v.get('sha') and r != 'engineering-knowledge' and re.search(rf'(^|[\s/\\]){re.escape(r)}[/\\]', cited_txt))
+    tech = []
+    layer = rca.get('layer')
+    if loc.get('verified') and layer and layer != 'unknown':
+        tech.append(f"- **Lớp lỗi:** `{layer}`" + (f" (code đọc ở {loc['ref']})" if loc.get('ref') else ''))
+    if norm(rca.get('client_version')):
+        tech.append(f"- **Phiên bản client:** {_plain(rca['client_version'])}")
     if versions_txt or norm(rca.get('code_version')):
-        L.append(f"- Bản code đã dẫn: {versions_txt}" + (f". Đối chiếu bản đang chạy: {norm(rca['code_version'])}" if norm(rca.get('code_version')) else ''))
-    for key, label in (('repro_steps', 'Cách tái hiện'), ('suggested_fix', 'Gợi ý sửa'),
-                       ('failing_test_idea', 'Test đề xuất'), ('jira_title', 'Tiêu đề Jira gợi ý')):
-        if norm(rca.get(key)):
-            L.append(f"- {label}: {norm(rca[key])}")
-    if rca.get('could_not_confirm'):
-        L.append('- Chưa xác nhận được: ' + '; '.join(rca['could_not_confirm']))
+        tech.append(f"- **Bản code đã dẫn:** {versions_txt}" + (f". Đối chiếu bản đang chạy: {_plain(rca['code_version'])}" if norm(rca.get('code_version')) else ''))
     v = out.get('verifier')
     if v:
-        L.append(f"- Verifier độc lập: {v.get('verdict')}" + (' — ' + '; '.join(v['holes']) if v.get('holes') else ''))
+        tech.append(f"- **Verifier độc lập:** `{v.get('verdict')}`" + (' — *' + _plain('; '.join(v['holes'])) + '*' if v.get('holes') else ''))
     if out.get('_problems'):
-        L.append('- Bot hạ trạng thái do trích dẫn không kiểm chứng được: ' + ' | '.join(out['_problems'][:4]))
+        tech.append('- **Bot hạ trạng thái** do trích dẫn không kiểm chứng được: ' + ' | '.join(_plain(p) for p in out['_problems'][:4]))
+    if tech:
+        L += ['', '**CHI TIẾT KỸ THUẬT:**'] + tech
     return L
 
 
