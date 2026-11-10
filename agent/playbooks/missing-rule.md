@@ -1,0 +1,10 @@
+# Playbook: thiếu kiểm tra ("giá trị sai vẫn được chấp nhận / tạo / publish")
+
+Bug loại này không có lỗi runtime: API trả 200 và mọi thứ chạy "đúng" với code hiện tại. Bằng chứng nằm ở **một kiểm tra vắng mặt**, nên rất dễ dừng ở nơi *trông* thiếu mà chưa phải nơi thật sự thiếu (đã gặp: một validator đầu vào chỉ có `GreaterThan(0)`, trong khi kiểm tra tối thiểu thật nằm ở tầng domain/service).
+
+1. **Phát biểu quy tắc** bằng một câu: giá trị/điều kiện, nguồn (ticket, đặc tả PO ở product packs), và phạm vi (luồng nào phải tuân theo).
+2. **Tìm luồng anh em ĐANG thực thi quy tắc.** Tìm theo chính quy tắc (hằng số, tên hàm kiểu `GetMin…`/`Max…`, thông báo lỗi tương ứng, giá trị `1000`), không chỉ theo tên luồng bị lỗi. Ghi `đường dẫn:dòng` nơi quy tắc được áp dụng.
+3. **Lần đủ đường đi của API lỗi qua mọi tầng**: route → controller → command/handler → validator của lệnh → hàm domain/aggregate → service dùng chung → ghi DB. Với mỗi tầng ghi `đường dẫn:dòng` đã **Read** và nó có hay không có quy tắc. **Không được viết "không có kiểm tra ở tầng X" khi chưa Read tầng X**; tầng chưa đọc ghi vào `rca.could_not_confirm`, không ghi thành kết luận.
+4. **Vị trí lỗi** là chỗ luồng anh em có kiểm tra (hoặc gọi hàm kiểm tra), luồng lỗi chạm tới cùng điểm đó nhưng không gọi. Thường là hàm domain/service dùng chung, không phải validator đầu vào. Một validator "không có rule" chưa phải nguyên nhân nếu tầng phía sau vốn là nơi áp dụng quy tắc.
+5. **Nêu bất đối xứng** trong `mechanism`: luồng nào có kiểm tra, luồng nào không, và hàm nào là chỗ khác nhau (cả hai `đường dẫn:dòng`).
+6. **Dấu hiệu runtime:** kiểm tra service có New Relic ở staging không (product, search, marketing, notifier, gateway thì không). Bot chỉ đọc nên không tự tạo dữ liệu để tái hiện. Phản hồi API do người báo dán trong ticket không phải kết quả tool nên không dùng làm `decisive_signal`. Không có dấu hiệu runtime thì để `decisive_signal.observed = false`: kết quả sẽ là ứng viên nguyên nhân, và `suggested_fix` + `failing_test_idea` (test gọi đúng API với giá trị biên) là phần giá trị nhất cho người trực.

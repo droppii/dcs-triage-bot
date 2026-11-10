@@ -28,7 +28,10 @@
           "biz-mobile"
         ],
         "tracker": "Bugsnag project 'Droppii Biz'",
-        "confirmed": false
+        "confirmed": false,
+        "mcp": [
+          "bugsnag"
+        ]
       },
       "Mall App": {
         "layer": "mobile",
@@ -36,7 +39,10 @@
           "customer-mobile"
         ],
         "tracker": "Bugsnag project 'Droppii Mall'",
-        "confirmed": false
+        "confirmed": false,
+        "mcp": [
+          "bugsnag"
+        ]
       },
       "Mall Web": {
         "layer": "fe",
@@ -44,7 +50,10 @@
           "web-mall"
         ],
         "tracker": "Sentry project 'web-mall' (org droppii-kp)",
-        "confirmed": false
+        "confirmed": false,
+        "mcp": [
+          "sentry"
+        ]
       },
       "Biz Web": {
         "layer": "fe",
@@ -52,7 +61,8 @@
           "b2b-client"
         ],
         "tracker": "chưa rõ",
-        "confirmed": false
+        "confirmed": false,
+        "mcp": []
       },
       "PDP Portal": {
         "layer": "fe",
@@ -60,7 +70,8 @@
           "dashboards"
         ],
         "tracker": "chưa rõ",
-        "confirmed": false
+        "confirmed": false,
+        "mcp": []
       },
       "OBEFE": {
         "layer": "fe",
@@ -68,7 +79,8 @@
           "dashboards"
         ],
         "tracker": "chưa rõ",
-        "confirmed": false
+        "confirmed": false,
+        "mcp": []
       },
       "ERP": {
         "layer": "fe",
@@ -76,7 +88,8 @@
           "erp-dashboard"
         ],
         "tracker": "chưa rõ",
-        "confirmed": false
+        "confirmed": false,
+        "mcp": []
       },
       "Odoo": {
         "layer": "odoo",
@@ -84,10 +97,22 @@
           "droppii-odoo"
         ],
         "tracker": "New Relic vn-stg-odoo-service",
-        "confirmed": true
+        "confirmed": true,
+        "mcp": []
       }
     }
   },
+  "mcp_note": "MCP bật theo Product (mỗi server thừa tốn token ở MỌI lượt: Sentry ~86k, Bugsnag ~26k, New Relic ~32k; đã đo 10/11). mcp_default luôn bật; products.map.<Product>.mcp thêm tracker của Product; Product lạ dùng mcp_unknown_product. Tool không nằm trong READ_TOOLS bị cắt bằng --disallowedTools.",
+  "mcp_default": [
+    "newrelic",
+    "dbhub",
+    "repogit",
+    "codeindex"
+  ],
+  "mcp_unknown_product": [
+    "sentry",
+    "bugsnag"
+  ],
   "gate": {
     "note": "Điều kiện để bot được kết luận, theo loại. source_be/db/newrelic = bước điều tra đã confirmed. Bug code (C) dùng bằng chứng RCA: code_location (file:line khớp code thật), runtime_signal (trích nguyên văn từ kết quả tool), mechanism (cơ chế + chuỗi nhân quả), alternatives (>=1 giả thuyết khác, không còn cái nào 'supported').",
     "A": [
@@ -113,7 +138,8 @@
     ]
   },
   "verifier": {
-    "enabled": true,
+    "note": "TẮT mặc định vì chi phí: mỗi lần chạy thêm $0,17-0,25 (tới 600k token) và chưa đáng tin trên DMW-2203 (bắt đúng 1, FAIL nhầm 1 lần đúng, PASS nhầm 1 lần sai). Cổng kiểm chứng bằng code (rca.py) đã chặn kết luận thiếu bằng chứng runtime. Bật lại khi tools/eval.py chứng minh có lợi.",
+    "enabled": false,
     "model": "sonnet"
   },
   "model": "sonnet",
@@ -124,8 +150,8 @@
     "field": ""
   },
   "index": {
-    "note": "Chỉ mục mã nguồn cục bộ (SQLite FTS5) để bot tra cứu thay vì Grep + đọc cả file: xem tools/code_index.py. Build bằng tools/setup.sh (hoặc python3 tools/code_index.py build). Tắt = bot chỉ dùng Grep/Read.",
-    "enabled": true,
+    "note": "TẮT mặc định: đo 10/11 cho thấy có/không index cho cùng độ đúng và chi phí (xem README mục 'Chi phí'). Chỉ mục mã nguồn cục bộ (SQLite FTS5): tools/code_index.py. Bật lại cho repo FE/mobile lớn nếu đo được lợi ích. Build bằng tools/setup.sh.",
+    "enabled": false,
     "db": "knowledge/_index/code.sqlite"
   },
   "poll_seconds": 60,

@@ -35,15 +35,16 @@ def ev(kind, **kw):
     return json.dumps(kw | {'type': kind})
 NR = 'TransactionError: java.lang.NullPointerException: Cannot invoke "Warehouse.getUuid()" because "w" is null'
 transcript = '\n'.join([
-    ev('assistant', message={'content': [{'type': 'tool_use', 'name': 'mcp__newrelic__execute_nrql_query', 'input': {'q': 'x'}}]}),
-    ev('user', message={'content': [{'type': 'tool_result', 'content': [{'type': 'text', 'text': NR}]}]}),
-    ev('assistant', message={'content': [{'type': 'tool_use', 'name': 'Read', 'input': {'file_path': str(JAVA)}}]}),
+    ev('assistant', message={'content': [{'type': 'tool_use', 'id': 't1', 'name': 'mcp__newrelic__execute_nrql_query', 'input': {'q': 'x'}}]}),
+    ev('user', message={'content': [{'type': 'tool_result', 'tool_use_id': 't1', 'content': [{'type': 'text', 'text': NR}]}]}),
+    ev('assistant', message={'content': [{'type': 'tool_use', 'id': 't2', 'name': 'Read', 'input': {'file_path': str(JAVA)}}]}),
+    ev('user', message={'content': [{'type': 'tool_result', 'tool_use_id': 't2', 'content': 'const id = cart.getWarehouse().getUuid(); // static code read'}]}),
     ev('result', is_error=False, structured_output={}, total_cost_usd=0.1),
 ])
 tr = rca.parse_transcript(transcript)
 # files the (fake) model was shown by search/investigate in this run, besides the Read of CartServiceImpl.java above
 tr['results'] += '\n1. biz-mobile/src/CartScreen.tsx:1-4 [mobile/code]\n2. engineering-knowledge/handbook/pack.md:1-2 [docs/docs]\n3. Dup.java Uniq.java'
-assert len(tr['tool_uses']) == 2 and NR in tr['results'] and tr['final']['total_cost_usd'] == 0.1
+assert len(tr['tool_uses']) == 2 and NR in tr['results'] and NR in tr['runtime'] and 'static code read' not in tr['runtime'] and tr['final']['total_cost_usd'] == 0.1
 
 
 def make(**over):
@@ -280,6 +281,19 @@ assert rca.verdict(dl) == '?' and 'code_location' in rca.gate_failures(dl)
 dok = make()                                     # the same claim in a real code repo is unaffected
 rca.validate(dok, tr, K, {'mono-backend': 'be', 'engineering-knowledge': 'docs'})
 assert dok['rca']['code_location']['verified'] and rca.verdict(dok) == 'C'
+
+# --- the decisive signal must come from a RUNTIME tool: a code line the model just Read is not "what happened" (DMW-2203 passed the
+#     gate with a Read of the validator as its "runtime signal" and was wrong) ---
+code_sig = make()
+code_sig['rca']['decisive_signal']['quote'] = 'const id = cart.getWarehouse().getUuid(); // static code read'
+rca.validate(code_sig, tr, K)
+assert not code_sig['rca']['decisive_signal']['verified'] and any('không phải dấu hiệu runtime' in p for p in code_sig['_problems']), code_sig['_problems']
+assert rca.verdict(code_sig) == '?' and 'runtime_signal' in rca.gate_failures(code_sig)
+rt_sig = make()                                                                    # same claim, but the line really came from New Relic
+rca.validate(rt_sig, tr, K)
+assert rt_sig['rca']['decisive_signal']['verified'] and rca.verdict(rt_sig) == 'C'
+unlinked = rca.parse_transcript(json.dumps({'type': 'user', 'message': {'content': [{'type': 'tool_result', 'content': NR}]}}))
+assert unlinked['runtime'] == ''                                                   # a result we cannot attribute to a runtime tool is static
 
 # --- a cited file must have been shown to the model in THIS run (search / investigate / Read), never remembered or invented ---
 unseen = make()

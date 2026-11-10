@@ -26,6 +26,7 @@ CHECK_LABEL = {'source_be': 'Code', 'db': 'DB', 'newrelic': 'New Relic', 'code_l
                'runtime_signal': 'dấu hiệu runtime', 'mechanism': 'cơ chế + chuỗi nhân quả',
                'alternatives': 'đã loại giả thuyết khác', 'client_version': 'phiên bản app/bundle'}
 CODE_LAYERS = {'be', 'odoo', 'fe', 'mobile'}
+RUNTIME_TOOLS = ('mcp__newrelic__', 'mcp__dbhub__', 'mcp__bugsnag__', 'mcp__sentry__')
 SAFE_REF = re.compile(r'^[\w./@+\-]{1,100}$')
 
 
@@ -50,8 +51,11 @@ def _text(content):
 
 
 def parse_transcript(text):
-    """stream-json lines -> {'tool_uses': [{'name','input'}], 'results': str, 'final': result-event|None}."""
-    uses, results, final = [], [], None
+    """stream-json lines -> {'tool_uses': [{'name','input'}], 'results': str, 'runtime': str, 'final': result-event|None}.
+    `runtime` = only the results of runtime tools (New Relic, DB, Bugsnag, Sentry): what actually happened, as opposed to what the code
+    says (Read, Grep, code index, git). A result whose tool call cannot be identified counts as static."""
+    uses, results, runtime, final = [], [], [], None
+    names = {}
     for line in text.splitlines():
         try:
             e = json.loads(line)
@@ -68,9 +72,13 @@ def parse_transcript(text):
                 continue
             if b.get('type') == 'tool_use':
                 uses.append({'name': b.get('name', ''), 'input': b.get('input') or {}})
+                names[b.get('id')] = b.get('name', '')
             elif b.get('type') == 'tool_result':
-                results.append(_text(b.get('content')))
-    return {'tool_uses': uses, 'results': '\n'.join(results), 'final': final}
+                txt = _text(b.get('content'))
+                results.append(txt)
+                if names.get(b.get('tool_use_id'), '').startswith(RUNTIME_TOOLS):
+                    runtime.append(txt)
+    return {'tool_uses': uses, 'results': '\n'.join(results), 'runtime': '\n'.join(runtime), 'final': final}
 
 
 def seen_in_run(tr):
@@ -84,9 +92,9 @@ def _used(tr, prefix):
     return any(u['name'].startswith(prefix) for u in tr['tool_uses'])
 
 
-def _haystack(tr):
-    """Every tool result, comparison-normalised (see loose())."""
-    return loose(tr['results'])
+def _haystack(tr, runtime_only=False):
+    """Tool results, comparison-normalised (see loose()). runtime_only: only what New Relic / DB / Bugsnag / Sentry returned."""
+    return loose(tr['runtime'] if runtime_only else tr['results'])
 
 
 # ---------- code citations ----------
@@ -253,8 +261,11 @@ def validate(out, tr, kdir, layers=None):
     sig_ok = False
     if sig.get('observed'):
         q = loose(sig.get('quote'))
-        sig_ok = len(q) >= 8 and q in _haystack(tr)
-        if not sig_ok:
+        sig_ok = len(q) >= 8 and q in _haystack(tr, runtime_only=True)
+        if not sig_ok and len(q) >= 8 and q in _haystack(tr):
+            problems.append('decisive_signal: câu trích chỉ có trong kết quả đọc code (Read/Grep/index), không phải dấu hiệu runtime của sự cố; '
+                            'đọc code chỉ cho biết code CÓ THỂ gây lỗi, không cho biết code đã chạy')
+        elif not sig_ok:
             problems.append('decisive_signal: câu trích không có trong kết quả tool')
     sig['verified'] = sig_ok
     rca['decisive_signal'] = sig

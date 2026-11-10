@@ -10,7 +10,7 @@ Prod is only READ (Schedule = on-call rota). Every write is guarded to the sandb
   python3 bot.py --dry-ticket F    run the brain on a ticket or cases/*.json file, print result, write nothing
 Config: config.json (or $DCS_CONFIG). Local secrets: .env (see .env.example).
 """
-import argparse, getpass, json, os, re, subprocess, sys, time
+import argparse, getpass, hashlib, json, os, re, subprocess, sys, threading, time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -240,9 +240,11 @@ def pick_oncall(rows, product, now):
 
 # ---------- brain ----------
 
-def mcp_config():
-    """MCP servers for the brain. HTTP ones use the runner's own OAuth login (claude /mcp); dbhub is local + readonly."""
-    return json.dumps({'mcpServers': {
+def mcp_config(servers=None):
+    """MCP servers for the brain (only `servers` if given). HTTP ones use the runner's own OAuth login (claude /mcp); dbhub is local
+    + readonly. Every server's tool definitions are re-read on EVERY turn (Sentry alone is ~86k tokens), so a run gets only the
+    servers its Product needs (see product_servers) and none of the tools the bot never allows (see denied_tools)."""
+    full = {
         'sentry': {'type': 'http', 'url': 'https://mcp.sentry.dev/mcp'},
         'bugsnag': {'type': 'http', 'url': 'https://bugsnag.mcp.smartbear.com/mcp'},
         'newrelic': {'type': 'http', 'url': 'https://mcp.newrelic.com/mcp/'},
@@ -252,7 +254,72 @@ def mcp_config():
         **({'codeindex': {'type': 'stdio', 'command': sys.executable,
                           'args': ['-I', str(ROOT / 'tools/code_index.py'), 'serve', '--db', str(INDEX_DB), '--root', str(KNOWLEDGE_DIR)]}}
            if INDEX['enabled'] else {}),
-    }})
+    }
+    return json.dumps({'mcpServers': {k: v for k, v in full.items() if servers is None or k in servers}})
+
+
+def product_servers(product):
+    """MCP servers a ticket of this Product needs: the common set (New Relic for the API layer, DB, git, code index) plus the client
+    error tracker of the Product (Bugsnag for the mobile apps, Sentry for web-mall). Unknown Product: every tracker."""
+    base = list(CFG.get('mcp_default', ['newrelic', 'dbhub', 'repogit', 'codeindex']))
+    pm = {k.casefold(): v for k, v in ((CFG.get('products') or {}).get('map') or {}).items()}
+    entry = pm.get(str(product or '').strip().casefold())
+    extra = entry.get('mcp', []) if entry else CFG.get('mcp_unknown_product', ['sentry', 'bugsnag'])
+    have = json.loads(mcp_config())['mcpServers']
+    return [x for x in dict.fromkeys(base + list(extra)) if x in have]
+
+
+def discover_mcp_tools(force=False):
+    """{server: [tool names]} as the servers expose them. Read once from the CLI's init event (killed right after, before any model
+    call) and cached for a week, because denying a tool needs its exact name."""
+    cache = ROOT / 'data' / 'mcp_tools.json'
+    key = hashlib.sha1(mcp_config().encode()).hexdigest()[:12]
+    try:
+        d = json.loads(cache.read_text(encoding='utf-8'))
+        if not force and d.get('key') == key and time.time() - d.get('at', 0) < 7 * 86400:
+            return d['tools']
+    except (OSError, ValueError):
+        pass
+    cmd = claude_cmd('x', 'haiku')
+    cmd.pop(cmd.index('-p') + 1)
+    tools = {}
+    proc = subprocess.Popen(cmd, cwd=ROOT / 'agent', stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                            text=True, encoding='utf-8', errors='replace')
+    timer = threading.Timer(120, proc.kill)
+    timer.start()
+    try:
+        proc.stdin.write('x')
+        proc.stdin.close()
+        for line in proc.stdout:
+            try:
+                e = json.loads(line)
+            except ValueError:
+                continue
+            if e.get('type') == 'system' and e.get('subtype') == 'init':
+                for t in e.get('tools', []):
+                    if t.startswith('mcp__'):
+                        tools.setdefault(t.split('__')[1], []).append(t)
+                break
+    finally:
+        timer.cancel()
+        proc.kill()
+    if tools:
+        cache.parent.mkdir(parents=True, exist_ok=True)
+        cache.write_text(json.dumps({'key': key, 'at': time.time(), 'tools': tools}), encoding='utf-8')
+    return tools
+
+
+def denied_tools(servers):
+    """Tools of the selected servers that READ_TOOLS does not allow: the model never needs them, yet their definitions cost tokens on
+    every turn. Empty if the tool lists are unknown (then nothing is trimmed, only more expensive)."""
+    try:
+        tools = discover_mcp_tools()
+    except Exception as e:
+        print(f'mcp tool discovery skipped: {e}', file=sys.stderr)
+        return []
+    allowed = {t for t in READ_TOOLS if t.startswith('mcp__')}
+    wide = [t for t in allowed if t.count('__') == 1]          # whole-server rules such as mcp__dbhub
+    return [t for srv in servers for t in tools.get(srv, []) if t not in allowed and not any(t.startswith(w + '__') for w in wide)]
 
 
 def product_map_text():
@@ -287,9 +354,9 @@ def rules(path='agent/RULES.md'):
     return render((ROOT / path).read_text(encoding='utf-8'))
 
 
-def claude_cmd(prompt, model):
+def claude_cmd(prompt, model, servers=None):
     return ['claude', '-p', prompt, '--model', model, '--output-format', 'stream-json', '--verbose',
-            '--mcp-config', mcp_config(), '--strict-mcp-config', '--setting-sources', '',
+            '--mcp-config', mcp_config(servers), '--strict-mcp-config', '--setting-sources', '',
             '--tools', 'Read,Grep,Glob', '--permission-mode', 'dontAsk', '--allowedTools', *READ_TOOLS]
 
 
@@ -326,11 +393,11 @@ def ticket_usage(code):
     return usage.summarize(mine) if mine else None
 
 
-def run_claude(prompt, system, schema_file, label, model=None, role='brain'):
+def run_claude(prompt, system, schema_file, label, model=None, role='brain', servers=None):
     """One read-only `claude -p` run. Returns the log path (full transcript = audit log of every tool call).
     Long inputs never go on the command line (Windows CreateProcess stops at ~32k characters: the rules, schema, tool list and a
     long thread together exceed it): the prompt goes through stdin, the rules and MCP config through files."""
-    cmd = claude_cmd(prompt, model or MODEL)
+    cmd = claude_cmd(prompt, model or MODEL, servers)
     cmd.pop(cmd.index('-p') + 1)                                   # prompt -> stdin
     RUN_DIR.mkdir(parents=True, exist_ok=True)
     stamp = f'{label}-{datetime.now(TZ):%Y%m%d-%H%M%S}'
@@ -343,6 +410,9 @@ def run_claude(prompt, system, schema_file, label, model=None, role='brain'):
     extra = ['--append-system-prompt-file', str(rules_file), '--json-schema', schema]
     if MAX_BUDGET:
         extra += ['--max-budget-usd', str(MAX_BUDGET)]
+    denied = denied_tools(servers) if servers else []
+    if denied:
+        extra += ['--disallowedTools', *denied]                    # variadic too, so it also stays before --allowedTools
     cmd[i:i] = extra
     LOGS.mkdir(exist_ok=True)
     log = LOGS / f'{stamp}.jsonl'
@@ -406,7 +476,8 @@ def run_verifier(out, label):
               f'<rca>\n{json.dumps(record, ensure_ascii=False, indent=1)}\n</rca>')
     try:
         log = run_claude(prompt, rules('agent/VERIFIER.md'), 'agent/verifier_schema.json', f'{label}-verify',
-                         VERIFIER.get('model') or MODEL, role='verifier')
+                         VERIFIER.get('model') or MODEL, role='verifier',
+                         servers=[x for x in ('newrelic', 'repogit', 'codeindex') if x in json.loads(mcp_config())['mcpServers']])
         res, _ = structured_result(log)
         v = res['structured_output']
         v['_cost'] = res.get('total_cost_usd')
@@ -459,7 +530,7 @@ def run_brain(ticket, thread_text='', label='dry', attachments=(), prior=()):
                    'giả thuyết "trùng/không phải bug", vẫn phải tự kiểm chứng):\n'
                    + json.dumps([{k: sanitize(str(v)) for k, v in p.items()} for p in prior], ensure_ascii=False, indent=1)
                    + '\n</prior_tickets>')
-    log = run_claude(prompt, rules(), 'agent/schema.json', label)
+    log = run_claude(prompt, rules(), 'agent/schema.json', label, servers=product_servers(ticket.get('Product')))
     out = finalize_log(log, versions)
     if (VERIFIER.get('enabled') and out['type'] == 'C' and rca.gated(out, GATE)
             and not rca.gate_failures(out, GATE)):  # only a would-be conclusion is worth a second look

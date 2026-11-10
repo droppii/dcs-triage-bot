@@ -160,6 +160,36 @@ Cách làm lấy từ doc về cách Cerebro/Titan được dùng trong Heimdall
 
 Kết luận trung thực: index làm mỗi lần tra rẻ và nhanh, nhưng **không tự làm model điều tra kỹ hơn**. Khi dừng sớm ở hit đầu bảng, bot rẻ hơn nửa và sai (mã lỗi 4064 được ném ở nhiều handler). Hai chốt chặn đã có: cổng kết luận vẫn chặn (verdict `?`, ứng viên ghi rõ "CHƯA đủ bằng chứng" kèm cảnh báo "chưa có dấu hiệu runtime khớp, chưa chắc là nơi đã chạy"), và luật 6 trong `RULES.md` bắt lấy `request.uri` của API đang lỗi để chọn handler. Chi phí của lần chạy đầu sau một thời gian nghỉ cao hơn nhiều (cache chưa nóng: tool của New Relic, Sentry, Bugsnag nặng khoảng 150k token ghi cache), nên đừng so chi phí giữa các lần chạy khác trạng thái cache. Cần chạy `tools/eval.py --runs 5` trên các case có đáp án để biết tỷ lệ đúng thật sự.
 
+## Chi phí: cái gì thật sự tốn tiền (đo 10/11/2026)
+
+Chi phí mỗi lần phân tích gần như tỷ lệ với **số lượt × đầu vào cố định mỗi lượt**, không phải với lượng code đọc. Đầu vào cố định là luật + định nghĩa tool của mọi MCP, và model đọc lại nó ở **mọi** lượt:
+
+| Cấu hình MCP | Token cố định mỗi lượt |
+|---|---|
+| Tất cả (Sentry 73 tool, Bugsnag 19, New Relic 33, + DB, git, index) | **132k** |
+| Sentry riêng | 86k |
+| New Relic riêng | 32k |
+| Bugsnag riêng | 26k |
+| Chỉ `codeindex` + `repogit` | 8k |
+| Cắt tool không bao giờ dùng (`--disallowedTools`) | Sentry 86k → 23k, New Relic 32k → 20k, Bugsnag 26k → 16k |
+
+Vì vậy bot chỉ bật MCP phù hợp với Product của ticket (`config.json` → `products.map.<Product>.mcp`: Bugsnag cho Biz/Mall App, Sentry cho Mall Web, backend chỉ New Relic + DB + git) và cắt các tool ngoài `READ_TOOLS` (danh sách tool tự khám phá từ sự kiện init của CLI, lưu `data/mcp_tools.json`). Cùng case voucher: 0,6-1,4M token và $0,32 mỗi lần chạy xuống 0,2-0,4M token và $0,10-0,18 (cache nóng).
+
+**Verifier tắt mặc định** (`verifier.enabled: false`): mỗi lần chạy thêm $0,17-0,25 (có lần 600k token) và chưa đáng tin trên DMW-2203 (bắt đúng 1 lần, FAIL nhầm 1 lần đúng, PASS nhầm 1 lần sai). Việc chặn kết luận thiếu bằng chứng do `rca.py` làm bằng code, không tốn token.
+
+**Index mặc định tắt** (`index.enabled: false`): 6 lần voucher và 8 lần DMW-2203, có index và không index cho độ đúng và chi phí tương đương; cái quyết định độ đúng là quy trình điều tra và bằng chứng runtime, không phải cách tìm code. Index vẫn dùng được (`tools/code_index.py`, bật trong config) và có thể có ích cho repo FE/mobile lớn, nhưng chưa đo được lợi ích.
+
+**DMW-2203 (Jira, bug BE mức High, đã sửa ở commit `c986f3c0`; `cases/dmw-2203-flash-sale-min-discount.json`)**: thiếu kiểm tra mức giảm tối thiểu 1.000đ ở Flash Sale PDP. Đáp án: `ValidateProductFlashSale` trong `DiscountCampaign.cs` không gọi `GetMinDiscountValue()`. Chạy trên bản clone lùi về trước commit sửa:
+
+| Lần chạy | Vị trí bot trả | Verdict bot đăng |
+|---|---|---|
+| 4 lần đầu (chưa có playbook, có verifier) | 1/4 đúng; 3/4 trỏ vào `CreatePdpPortalDiscountCampaignCommandValidator` | 1 lần **`C` sai mà tự tin**, còn lại `?` |
+| 4 lần sau (playbook `missing-rule.md`, dấu hiệu runtime phải từ tool runtime) | **4/4 đúng** | `?` (đúng: product-service không có New Relic ở staging, DB không kết nối được) |
+
+Hai thay đổi sau lần đầu: (1) `decisive_signal` chỉ được tính khi chuỗi trích nằm trong kết quả của tool runtime (New Relic, DB, Bugsnag, Sentry), một dòng code vừa `Read` không còn được coi là "dấu hiệu runtime"; (2) playbook `agent/playbooks/missing-rule.md` bắt lần đủ mọi tầng (route → validator → domain → service) và tìm luồng anh em đang thực thi quy tắc. **Lưu ý:** playbook được viết sau khi thấy ticket này sai, nên 4/4 chưa phải kiểm chứng độc lập; cần thêm bug có đáp án khác.
+
+Giới hạn còn lại: với loại bug "thiếu kiểm tra" ở service không có New Relic, bot chỉ có thể trả "ứng viên nguyên nhân", không bao giờ `C`, vì bot chỉ đọc và không được tạo dữ liệu để tái hiện.
+
 ## Backend nhiều repo, web và mobile
 
 Bot đọc code ở **đúng repo của lớp có lỗi**, khai trong `config.json` → `knowledge` (mỗi repo có `layer`, `branch` riêng) và ghép Product → repo → công cụ lỗi client ở `products.map`:

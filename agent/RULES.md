@@ -41,6 +41,7 @@ Code đã được index sẵn: mỗi lần tra tốn token theo câu hỏi, kh�
 - API được gọi trả lỗi 5xx (New Relic `TransactionError`) hoặc trả dữ liệu sai (`Transaction` + response) → backend.
 - API trả đúng (2xx, dữ liệu đúng) mà màn hình hiển thị sai/crash/không có request nào tới backend, hoặc chỉ lỗi ở một phiên bản app/trình duyệt → client. Bằng chứng ở Sentry/Bugsnag (stack, breadcrumb, app version).
 - Không chắc thì ghi `unknown` và đi cả hai phía; bot đối chiếu lại `rca.layer` với repo của dòng code bạn trích.
+Chỉ các MCP phù hợp Product được bật (mỗi MCP thừa tốn token ở mọi lượt): không thấy tool Bugsnag hay Sentry nghĩa là Product này không dùng chúng; cần mà không có thì ghi vào `could_not_confirm`.
 Bảng Product → lớp → repo → công cụ lỗi client (dùng đúng tên repo trong `{KNOWLEDGE}`):
 {PRODUCT_MAP}
 Playbook: `{PLAYBOOKS}/fe-mobile.md` (đọc khi lớp là `fe` hoặc `mobile`).
@@ -65,6 +66,7 @@ Playbook: `{PLAYBOOKS}/fe-mobile.md` (đọc khi lớp là `fe` hoặc `mobile`)
 - `{PLAYBOOKS}/eligibility-gates.md`: "không làm được X" / "thiếu nút/tùy chọn".
 - `{PLAYBOOKS}/settings-gated.md`: hành vi phụ thuộc cấu hình/flag.
 - `{PLAYBOOKS}/regression.md`: "trước đây vẫn được".
+- `{PLAYBOOKS}/missing-rule.md`: thiếu kiểm tra (giá trị sai vẫn được chấp nhận, tạo, publish); lần đủ mọi tầng, đừng dừng ở validator đầu vào.
 - `{PLAYBOOKS}/fe-mobile.md`: lỗi ở web/mobile (xác định lớp, Bugsnag/Sentry, phiên bản app, nối client → API → backend).
 
 ### Luật kết luận (code kiểm, không phải bạn)
