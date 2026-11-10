@@ -360,7 +360,7 @@ def render_rca(out, knowledge, kdir, confirmed):
     loc = rca.get('code_location') or {}
     sig = rca.get('decisive_signal') or {}
     L = ['**NGUYÊN NHÂN GỐC (bot đã đối chiếu code và log):**' if confirmed
-         else '**ỨNG VIÊN NGUYÊN NHÂN (CHƯA đủ bằng chứng, người trực kiểm tra):**']
+         else '**NGUYÊN NHÂN:**']
     if norm(rca.get('mechanism')):
         L.append(f"- **Cơ chế:** {_plain(rca['mechanism'])}")
     if loc.get('verified'):
