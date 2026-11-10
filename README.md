@@ -5,7 +5,7 @@ Bot trên Lark nhận ticket DCS trước người trực. Nó đọc ticket, t�
 - **hỏi lại** nếu thiếu thông tin bắt buộc,
 - **chuyển người trực** kèm bằng chứng nếu chưa chắc hoặc là bug.
 
-> **Trạng thái (06/11/2026):** chạy thử trên **staging + bản clone DCS**. Chưa gắn vào group DCS thật, chưa đọc dữ liệu production. Đề xuất gốc: [DCS Triage Bot](https://claude.ai/artifact/N5KavFdbhvS9JU4GCU3JMd). Owner: Đoàn Cẩm Như (QA).
+> **Trạng thái (06/11/2026):** chạy thử trên **staging + bản clone DCS**. Chưa gắn vào group DCS thật, chưa đọc dữ liệu production. Đề xuất gốc: [DCS Triage Bot](https://claude.ai/artifact/N5KavFdbhvS9JU4GCU3JMd). 
 
 ## Bot xử lý một ticket thế nào
 
@@ -50,8 +50,6 @@ Gói cho người trực (loại C hoặc ứng viên chưa đủ bằng chứng
 | Quyết định | Ai / khi nào |
 |---|---|
 | Chỉ chạy staging hoặc bản clone, không đụng flow DCS đang chạy | Như, 06/11 |
-| Creds staging dùng theo service; cái gì không có staging thì ưu tiên MCP, rồi creds read-only; VM dùng chung làm sau | Head of Engineering, 06/11 |
-| Flow điều tra: scan source BE → trace DB → trace New Relic; **chỉ kết luận khi chắc 100%** (cả 3 bước khớp) | Dev BE, 06/11 |
 | Dính tiền (phí ship, giá, thanh toán, COD, hoa hồng, voucher) → **luôn giữ High**, kể cả 1 đơn | Như, 06/11 |
 | Vận hành bận: **chỉ hỏi thông tin bắt buộc**; đã có mã tham chiếu thì không hỏi | Như, 06/11 |
 
