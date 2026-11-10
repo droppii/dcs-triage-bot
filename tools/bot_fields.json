@@ -3,5 +3,6 @@
  {"name":"AI Type","type":"select","multiple":false,"options":[{"name":"A - Tra cứu"},{"name":"B - Cách dùng/Đúng thiết kế"},{"name":"C - Bug"},{"name":"D - Chỉnh dữ liệu"},{"name":"E - Đề xuất"},{"name":"? - Không chắc"}]},
  {"name":"AI Priority","type":"select","multiple":false,"options":[{"name":"High"},{"name":"Medium"},{"name":"Low"}]},
  {"name":"AI Note","type":"text"},
+ {"name":"AI Usage","type":"text"},
  {"name":"Bot Thread","type":"text"}
 ]

@@ -1,31 +1,382 @@
 {
   "type": "object",
   "additionalProperties": false,
-  "required": ["type", "confidence", "evidence", "priority_suggested", "priority_reason", "missing_info", "reply_markdown", "sources", "summary"],
+  "required": [
+    "type",
+    "confidence",
+    "evidence",
+    "rca",
+    "priority_suggested",
+    "priority_reason",
+    "missing_info",
+    "reply_markdown",
+    "sources",
+    "summary"
+  ],
   "properties": {
-    "type": {"type": "string", "enum": ["A", "B", "C", "D", "E", "?"]},
-    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+    "type": {
+      "type": "string",
+      "enum": [
+        "A",
+        "B",
+        "C",
+        "D",
+        "E",
+        "?"
+      ]
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
     "evidence": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["source_be", "db", "newrelic"],
+      "required": [
+        "source_be",
+        "db",
+        "newrelic"
+      ],
       "properties": {
-        "source_be": {"type": "object", "additionalProperties": false, "required": ["status", "detail"], "properties": {
-          "status": {"type": "string", "enum": ["confirmed", "contradicts", "not_found", "not_checked"]},
-          "detail": {"type": "string", "description": "đường dẫn:dòng và logic tìm được"}}},
-        "db": {"type": "object", "additionalProperties": false, "required": ["status", "detail"], "properties": {
-          "status": {"type": "string", "enum": ["confirmed", "contradicts", "not_found", "not_checked"]},
-          "detail": {"type": "string", "description": "database.bảng, khóa tra, giá trị liên quan"}}},
-        "newrelic": {"type": "object", "additionalProperties": false, "required": ["status", "detail"], "properties": {
-          "status": {"type": "string", "enum": ["confirmed", "contradicts", "not_found", "not_checked"]},
-          "detail": {"type": "string", "description": "NRQL/entity, khoảng thời gian, kết quả"}}}
+        "source_be": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "detail"
+          ],
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "confirmed",
+                "contradicts",
+                "not_found",
+                "not_checked"
+              ]
+            },
+            "detail": {
+              "type": "string"
+            }
+          },
+          "description": "detail: mọi đường dẫn:dòng đã đọc + logic tìm được. Mỗi đường dẫn:dòng sẽ được code đối chiếu với file thật."
+        },
+        "db": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "detail"
+          ],
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "confirmed",
+                "contradicts",
+                "not_found",
+                "not_checked"
+              ]
+            },
+            "detail": {
+              "type": "string"
+            }
+          },
+          "description": "detail: database.bảng, khóa tra, giá trị liên quan"
+        },
+        "newrelic": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "detail"
+          ],
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "confirmed",
+                "contradicts",
+                "not_found",
+                "not_checked"
+              ]
+            },
+            "detail": {
+              "type": "string"
+            }
+          },
+          "description": "detail: NRQL/entity, khoảng thời gian, kết quả"
+        }
       }
     },
-    "priority_suggested": {"type": "string", "enum": ["High", "Medium", "Low"]},
-    "priority_reason": {"type": "string"},
-    "missing_info": {"type": "array", "items": {"type": "string"}},
-    "reply_markdown": {"type": "string"},
-    "sources": {"type": "array", "items": {"type": "string"}},
-    "summary": {"type": "string", "description": "1-2 câu cho cột AI Note và người trực"}
+    "rca": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Nguyên nhân gốc. Chỉ điền những gì có trong kết quả tool của lần chạy này; không biết thì để chuỗi rỗng / 0 / mảng rỗng. Mọi trích dẫn được code đối chiếu tự động.",
+      "required": [
+        "category",
+        "symptom_card",
+        "code_location",
+        "mechanism",
+        "decisive_signal",
+        "causal_chain",
+        "alternatives",
+        "blast_radius",
+        "introduced_by",
+        "code_version",
+        "suggested_fix",
+        "failing_test_idea",
+        "repro_steps",
+        "jira_title",
+        "could_not_confirm"
+      ],
+      "properties": {
+        "category": {
+          "type": "string",
+          "enum": [
+            "code_defect",
+            "config",
+            "data_state",
+            "partner",
+            "infra_deploy",
+            "working_as_designed",
+            "already_fixed",
+            "duplicate",
+            "unknown",
+            "none"
+          ]
+        },
+        "symptom_card": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "expected",
+            "actual",
+            "error_text",
+            "entities",
+            "time_window",
+            "anchors"
+          ],
+          "properties": {
+            "expected": {
+              "type": "string"
+            },
+            "actual": {
+              "type": "string"
+            },
+            "error_text": {
+              "type": "string",
+              "description": "chuỗi lỗi nguyên văn từ ticket/ảnh"
+            },
+            "entities": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "time_window": {
+              "type": "string"
+            },
+            "anchors": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "text UI, route, mã lỗi, stack frame, từ khóa tính năng"
+            }
+          }
+        },
+        "code_location": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "file",
+            "line_start",
+            "line_end",
+            "symbol",
+            "snippet"
+          ],
+          "properties": {
+            "file": {
+              "type": "string",
+              "description": "đường dẫn tương đối trong knowledge/, vd mono-backend/java/services/order/.../CartServiceImpl.java; rỗng nếu chưa tìm ra"
+            },
+            "line_start": {
+              "type": "integer"
+            },
+            "line_end": {
+              "type": "integer"
+            },
+            "symbol": {
+              "type": "string"
+            },
+            "snippet": {
+              "type": "string",
+              "description": "1-6 dòng chép nguyên văn từ file, đúng chỗ gây lỗi"
+            }
+          }
+        },
+        "mechanism": {
+          "type": "string",
+          "description": "vì sao đoạn code đó làm vỡ, với đúng dữ liệu của ticket (vd: giá trị nào null, vì sao null); phải giải thích được vì sao đơn/tài khoản này lỗi mà cái khác thì không"
+        },
+        "decisive_signal": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "observed",
+            "what",
+            "quote",
+            "source",
+            "at"
+          ],
+          "properties": {
+            "observed": {
+              "type": "boolean",
+              "description": "true chỉ khi tận mắt thấy trong kết quả tool của sự cố này (log/trace/lỗi/dòng DB)"
+            },
+            "what": {
+              "type": "string"
+            },
+            "quote": {
+              "type": "string",
+              "description": "chuỗi chép NGUYÊN VĂN (>=8 ký tự) từ kết quả tool, code sẽ tìm lại trong nhật ký"
+            },
+            "source": {
+              "type": "string"
+            },
+            "at": {
+              "type": "string",
+              "description": "thời điểm, kèm +0700"
+            }
+          }
+        },
+        "causal_chain": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "link",
+              "claim",
+              "artifact"
+            ],
+            "properties": {
+              "link": {
+                "type": "string",
+                "enum": [
+                  "symptom",
+                  "owner",
+                  "defect",
+                  "mechanism",
+                  "blast_radius",
+                  "history"
+                ]
+              },
+              "claim": {
+                "type": "string"
+              },
+              "artifact": {
+                "type": "string",
+                "description": "đường dẫn:dòng, câu SQL, NRQL, dòng log, commit"
+              }
+            }
+          }
+        },
+        "alternatives": {
+          "type": "array",
+          "description": "Các cách giải thích khác đã xét (dữ liệu, cấu hình, đúng thiết kế, trùng, đã sửa, đối tác, hạ tầng) và cách đã kiểm",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "claim",
+              "status",
+              "artifact"
+            ],
+            "properties": {
+              "claim": {
+                "type": "string"
+              },
+              "status": {
+                "type": "string",
+                "enum": [
+                  "refuted",
+                  "supported",
+                  "unverified"
+                ]
+              },
+              "artifact": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "blast_radius": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "COUNT bản ghi tương tự, phạm vi API/app; không liệt kê"
+        },
+        "introduced_by": {
+          "type": "string",
+          "description": "commit/PR đưa vào (từ git_log/git_blame); rỗng nếu không có"
+        },
+        "code_version": {
+          "type": "string",
+          "description": "bản code đã đọc (repo@sha) và so với bản đang chạy (deployment marker New Relic) trùng hay không / không rõ"
+        },
+        "suggested_fix": {
+          "type": "string"
+        },
+        "failing_test_idea": {
+          "type": "string"
+        },
+        "repro_steps": {
+          "type": "string"
+        },
+        "jira_title": {
+          "type": "string"
+        },
+        "could_not_confirm": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "priority_suggested": {
+      "type": "string",
+      "enum": [
+        "High",
+        "Medium",
+        "Low"
+      ]
+    },
+    "priority_reason": {
+      "type": "string"
+    },
+    "missing_info": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "reply_markdown": {
+      "type": "string"
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "summary": {
+      "type": "string",
+      "description": "1-2 câu cho cột AI Note và người trực"
+    }
   }
 }

@@ -30,7 +30,7 @@ def read_env():
     src = os.environ.get('DCS_STG_DB_ENV_FILE')
     if KEYS - env.keys() and src:
         # Such files often can't be sourced whole (unquoted values); take only the DB keys.
-        for line in Path(src).expanduser().read_text().splitlines():
+        for line in Path(src).expanduser().read_text(encoding='utf-8').splitlines():
             m = re.match(r'^(DB_(?:HOST|PORT|USER|PASSWORD))=(.*)$', line.strip())
             if m:
                 env.setdefault(m.group(1), m.group(2).strip().strip('"\''))
@@ -55,7 +55,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix='dbhub-stg-') as d:
         path = Path(d) / 'dbhub.toml'
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        with os.fdopen(fd, 'w') as f:
+        with os.fdopen(fd, 'w', encoding='utf-8') as f:
             f.write(render(read_env()))
         sys.exit(subprocess.call(['node', str(DBHUB), '--transport', 'stdio', '--config', str(path)]))
 

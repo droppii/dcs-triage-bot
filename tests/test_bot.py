@@ -37,7 +37,11 @@ assert bot.pick_oncall(rows, 'Odoo', now) == ('', '')
 
 # compose_reply: priority change explained, routing only by name, nothing routed while info is missing
 ok3 = {k: {'status': 'confirmed', 'detail': 'x'} for k in ('source_be', 'db', 'newrelic')}
-out = {'type': 'C', 'confidence': 0.8, 'evidence': ok3, 'priority_suggested': 'Medium', 'priority_reason': '1 đơn',
+rca_ok = {'code_location': {'file': 'x.java', 'line_start': 1, 'line_end': 1, 'symbol': 's', 'snippet': '', 'verified': True},
+          'decisive_signal': {'observed': True, 'verified': True, 'what': 'NPE', 'quote': 'NullPointerException', 'source': 'nr', 'at': 't'},
+          'mechanism': 'uuid null', 'causal_chain': [{'link': 'defect', 'claim': 'c', 'artifact': 'a'}],
+          'alternatives': [{'claim': 'dữ liệu', 'status': 'refuted', 'artifact': 'sql'}]}
+out = {'type': 'C', 'confidence': 0.8, 'evidence': ok3, 'rca': rca_ok, 'priority_suggested': 'Medium', 'priority_reason': '1 đơn',
        'missing_info': [], 'reply_markdown': 'Lỗi do X.', 'sources': ['nr'], 'summary': 's', '_log': 'l'}
 r = bot.compose_reply(out, {'Priority': ['High']}, 'Dev C', 'BA D')
 assert 'High → Medium' in r and 'Chuyển: Dev C' in r and '<at' not in r and 'C - Bug' in r, r
@@ -53,6 +57,16 @@ assert bot.bot_fields(weak, 'Đã chuyển người')['AI Type'] == ['? - Không
 assert bot.verdict({**weak, 'type': 'E'}) == 'E'  # feature requests go to PO/BA, no investigation gate
 
 print('ok')
+
+# permission-rule paths: the old "/C:" + backslash form was denied by the CLI on Windows; //c/... works (verified)
+if bot.os.name == 'nt':
+    assert bot.perm_path(r'C:\Users\x\knowledge') == '//c/Users/x/knowledge', bot.perm_path(r'C:\Users\x\knowledge')
+else:
+    assert bot.perm_path('/Users/x/knowledge') == '//Users/x/knowledge'
+assert all(t.endswith('/**)') for t in bot.READ_TOOLS if t.startswith(('Read(', 'Grep(', 'Glob(')))
+assert 'mcp__repogit' in bot.READ_TOOLS and 'mcp__dbhub' in bot.READ_TOOLS
+# the model only ever gets read tools: no Bash/Write/Edit anywhere in the allowlist
+assert not any(t.split('(')[0] in ('Bash', 'Write', 'Edit', 'NotebookEdit') for t in bot.READ_TOOLS)
 
 # created_at: ISO, epoch ms, missing (missing must NOT skip the 3-minute card wait)
 n = datetime(2026, 11, 6, 15, 0, tzinfo=bot.TZ)

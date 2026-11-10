@@ -10,13 +10,100 @@
     "base_token": "UMiebZAFMahsj2s54uhlz3Ojgeh",
     "schedule_table": "tblw7ZnVIRvIlrXz"
   },
+  "env": {
+    "note": "Gắn cứng theo môi trường. Chuyển PROD = đổi khối này (xem docs/PROD-READINESS.md), không sửa agent/RULES.md.",
+    "name": "staging",
+    "label": "[STG]",
+    "nr_prefix": "vn-stg-",
+    "db_prefix": "stg_",
+    "code_branch": "dev",
+    "data_note": "theo dữ liệu staging"
+  },
+  "gate": {
+    "note": "Điều kiện để bot được kết luận, theo loại. source_be/db/newrelic = bước điều tra đã confirmed. Bug code (C) dùng bằng chứng RCA: code_location (file:line khớp code thật), runtime_signal (trích nguyên văn từ kết quả tool), mechanism (cơ chế + chuỗi nhân quả), alternatives (>=1 giả thuyết khác, không còn cái nào 'supported').",
+    "A": [
+      "source_be",
+      "db",
+      "newrelic"
+    ],
+    "B": [
+      "source_be",
+      "db",
+      "newrelic"
+    ],
+    "D": [
+      "source_be",
+      "db",
+      "newrelic"
+    ],
+    "C": [
+      "code_location",
+      "runtime_signal",
+      "mechanism",
+      "alternatives"
+    ]
+  },
+  "verifier": {
+    "enabled": true,
+    "model": "sonnet"
+  },
   "model": "sonnet",
+  "max_budget_usd": 1.5,
+  "usage": {
+    "note": "Mỗi lần phân tích ghi token + chi phí ước tính (giá niêm yết) vào AI Note và logs/usage.jsonl. Tổng hợp: python3 tools/usage_report.py. 'field' = tên cột Base riêng cho token (để trống = chỉ ghi vào AI Note).",
+    "ledger": true,
+    "field": ""
+  },
   "poll_seconds": 60,
   "card_wait_minutes": 3,
   "claude_timeout_seconds": 900,
+  "redact_logs": false,
+  "attachments": {
+    "note": "Tên cột ảnh/file đính kèm trong Base ticket (để trống = không dùng). Bot tải ảnh để model đọc chuỗi lỗi nguyên văn.",
+    "fields": [],
+    "max_files": 3,
+    "max_mb": 5
+  },
+  "prior_art": {
+    "note": "Tra ticket cũ đã đóng để phát hiện trùng/'không phải bug'. Tắt mặc định: cần quyết định cho phép đọc bảng ticket của Base DCS thật và tên cột.",
+    "enabled": false,
+    "base_token": "",
+    "table_id": "",
+    "fields": {
+      "code": "Code",
+      "title": "Title",
+      "description": "Description",
+      "status": "Status",
+      "resolution": "Resolution"
+    },
+    "closed_statuses": [
+      "Done",
+      "Closed"
+    ],
+    "limit": 300,
+    "top_k": 3
+  },
   "knowledge": [
-    {"name": "engineering-knowledge", "url": "https://github.com/droppii/engineering-knowledge.git", "branch": "main"},
-    {"name": "mono-backend", "url": "https://github.com/droppii/mono-backend.git", "branch": "dev"},
-    {"name": "droppii-odoo", "url": "https://github.com/droppii/droppii-odoo.git", "branch": "dev", "sparse": ["develop"]}
+    {
+      "name": "engineering-knowledge",
+      "url": "https://github.com/droppii/engineering-knowledge.git",
+      "branch": "main",
+      "history_days": 30
+    },
+    {
+      "name": "mono-backend",
+      "url": "https://github.com/droppii/mono-backend.git",
+      "branch": "dev",
+      "history_days": 180
+    },
+    {
+      "name": "droppii-odoo",
+      "url": "https://github.com/droppii/droppii-odoo.git",
+      "branch": "dev",
+      "sparse": [
+        "develop"
+      ],
+      "history_days": 180
+    }
   ]
 }

@@ -17,7 +17,8 @@
   "must_not": [
    "hỏi ảnh, thông báo lỗi, số người bị ảnh hưởng"
   ],
-  "routed_to_oncall": true
+  "routed_to_oncall": true,
+  "missing_info": true
  },
  "created": "2026-11-06"
 }

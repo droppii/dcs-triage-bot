@@ -20,7 +20,15 @@
   "must_not": [
    "kết luận là bug",
    "hỏi vận hành thêm thông tin"
-  ]
+  ],
+  "verdict_any_of": [
+   "?"
+  ],
+  "must_contain": [
+   "shipping_fee",
+   "real_shipping_fee"
+  ],
+  "max_tool_calls": 60
  },
  "created": "2026-11-06"
 }

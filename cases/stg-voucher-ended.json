@@ -15,7 +15,23 @@
    "New Relic vn-stg-promotion-service DomainException lúc 15:31:01 06/11",
    "ClaimVoucherCommandHandler.java:73-76 (không InProgress → 4064)"
   ],
-  "answer": "Voucher đã bị kết thúc thủ công nên báo lỗi là đúng thiết kế."
+  "answer": "Voucher đã bị kết thúc thủ công nên báo lỗi là đúng thiết kế.",
+  "verdict_any_of": [
+   "A",
+   "B"
+  ],
+  "must_contain": [
+   "KM03028706",
+   "ClaimVoucherCommandHandler"
+  ],
+  "code_location": {
+   "file_suffix": "ClaimVoucherCommandHandler.java",
+   "line_range": [
+    70,
+    80
+   ]
+  },
+  "max_tool_calls": 60
  },
  "created": "2026-11-06"
 }
