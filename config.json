@@ -17,7 +17,9 @@
     "nr_prefix": "vn-stg-",
     "db_prefix": "stg_",
     "code_branch": "dev",
-    "data_note": "theo dữ liệu staging"
+    "data_note": "theo dữ liệu staging",
+    "bugsnag_release_stage": "development",
+    "sentry_environment": "không có (Sentry chỉ nhận lỗi production; staging không gửi lỗi lên Sentry)"
   },
   "products": {
     "note": "Ghép Product (cột Product của ticket) với lớp lỗi, repo cần đọc và công cụ lỗi phía client. Suy ra từ handbook engineering-knowledge (platform.md, platform-fe.md); CHƯA được Dev FE/Mobile xác nhận (confirmed=false). API mà FE/mobile gọi nằm ở mono-backend.",

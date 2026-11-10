@@ -221,3 +221,10 @@ e = bot.parse_cli('', 'warn: x\n{"ok": false, "error": {"subtype": "rate_limit",
 assert e['error']['retryable'] is True
 assert bot.parse_cli('{"ok": true, "data": {"a": 1}}', '')['data']['a'] == 1
 print('ok parse_cli')
+
+# bearer tokens / JWTs from Bugsnag request headers are masked
+m = bot.sanitize('Authorization: Bearer eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiIxIn0.abc_DEF-123 and eyJhbGciOiJIUzI1NiJ9.eyJhIjoxfQ.sig')
+assert 'eyJ' not in m and 'Bearer ***' in m, m
+# error-tracker filters come from config env, not from our environment name (Biz staging = Bugsnag 'development')
+assert bot.render('{BUGSNAG_STAGE}') == bot.ENV.get('bugsnag_release_stage', bot.ENV['name'])
+print('ok jwt mask + tracker env')

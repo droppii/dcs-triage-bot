@@ -330,7 +330,10 @@ def render(text):
     """Resolve {PLACEHOLDERS} from config.json (environment, paths, product map)."""
     subs = {'{PRODUCT_MAP}': product_map_text(), '{KNOWLEDGE}': str(KNOWLEDGE_DIR), '{ANCHORS}': str(ANCHORS_DIR),
             '{PLAYBOOKS}': str(PLAYBOOKS_DIR), '{ENV_NAME}': ENV['name'], '{NR_PREFIX}': ENV['nr_prefix'],
-            '{DB_PREFIX}': ENV['db_prefix'], '{CODE_BRANCH}': ENV['code_branch'], '{DATA_NOTE}': ENV['data_note']}
+            '{DB_PREFIX}': ENV['db_prefix'], '{CODE_BRANCH}': ENV['code_branch'], '{DATA_NOTE}': ENV['data_note'],
+            # error trackers do not name environments like we do: Biz staging reports as Bugsnag 'development'
+            '{BUGSNAG_STAGE}': ENV.get('bugsnag_release_stage', ENV['name']),
+            '{SENTRY_ENV}': ENV.get('sentry_environment', ENV['name'])}
     for k, v in subs.items():
         text = text.replace(k, v)
     return text
@@ -552,6 +555,9 @@ def redact_log(log):
 
 _MASKS = [
     (re.compile(r'postgres(?:ql)?://\S+', re.I), 'postgres://***'),
+    # Bugsnag/Sentry payloads carry request headers: bearer tokens and JWTs must never reach a reply or a log
+    (re.compile(r'(?i)\bbearer\s+\S+'), 'Bearer ***'),
+    (re.compile(r'\beyJ[\w-]{8,}\.[\w-]+\.[\w-]+'), '***JWT***'),
     (re.compile(r'(?i)\b(password|passwd|pwd|secret|token|api[_-]?key)\b(\s*[:=]\s*)\S+'), r'\1\2***'),
     (re.compile(r'(?<![\w.])[\w.+-]+@[\w-]+\.[\w.-]+'), '***@***'),
     (re.compile(r'(?<!\d)(?:\+?84|0)[35789]\d{8}(?!\d)'), '***SĐT***'),
