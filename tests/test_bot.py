@@ -68,6 +68,53 @@ assert 'mcp__repogit' in bot.READ_TOOLS and 'mcp__dbhub' in bot.READ_TOOLS
 # the model only ever gets read tools: no Bash/Write/Edit anywhere in the allowlist
 assert not any(t.split('(')[0] in ('Bash', 'Write', 'Edit', 'NotebookEdit') for t in bot.READ_TOOLS)
 
+# rules + playbooks: every {PLACEHOLDER} is resolved (the model reads playbooks as plain files), product map is rendered
+import re as _re
+_rules = bot.rules()
+assert not _re.findall(r'\{[A-Z_]+\}', _rules), _re.findall(r'\{[A-Z_]+\}', _rules)
+for _f in bot.PLAYBOOKS_DIR.glob('*.md'):
+    assert not _re.findall(r'\{[A-Z_]+\}', _f.read_text(encoding='utf-8')), _f.name
+assert {f.name for f in bot.PLAYBOOKS_DIR.glob('*.md')} >= {'errors.md', 'fe-mobile.md', 'regression.md'}
+assert '- Biz App: lớp mobile; repo `biz-mobile`' in _rules and '- Mall Web: lớp fe; repo `web-mall`' in _rules
+assert 'chưa xác nhận' in bot.product_map_text() and bot.REPO_LAYER['biz-mobile'] == 'mobile' and bot.REPO_LAYER['mono-backend'] == 'be'
+assert str(bot.ANCHORS_DIR) in _rules and 'data' in str(bot.PLAYBOOKS_DIR)
+# every repo the product map points to is a configured clone with a client layer (a typo here would silently blind the bot)
+for _name, _v in bot.CFG['products']['map'].items():
+    for _r in _v['repos']:
+        assert bot.REPO_LAYER.get(_r) == _v['layer'], (_name, _r)
+
+# run_claude: nothing long on the command line (Windows stops at ~32k chars); prompt via stdin, rules + MCP config via files
+import json as _json, tempfile as _tf
+from pathlib import Path as _P
+_seen = {}
+_real_run, _real_logs, _real_ledger = bot.subprocess.run, bot.LOGS, bot.USAGE['ledger']
+def _fake_run(cmd, **kw):
+    _seen['cmd'], _seen['kw'] = list(cmd), kw
+    _seen['rules'] = _P(cmd[cmd.index('--append-system-prompt-file') + 1]).read_text(encoding='utf-8')
+    _seen['mcp'] = _json.loads(_P(cmd[cmd.index('--mcp-config') + 1]).read_text(encoding='utf-8'))
+    class _R: returncode = 0
+    return _R()
+bot.subprocess.run, bot.LOGS, bot.USAGE['ledger'] = _fake_run, _P(_tf.mkdtemp(prefix='dcs-logs-')), False
+try:
+    _long = 'x' * 100000
+    _log = bot.run_claude(_long, 'SYSTEM ' + 'r' * 50000, 'agent/schema.json', 'unit')
+finally:
+    bot.subprocess.run, bot.LOGS, bot.USAGE['ledger'] = _real_run, _real_logs, _real_ledger
+_cmd = _seen['cmd']
+assert _long not in ' '.join(_cmd) and _seen['kw']['input'] == _long, 'prompt must go through stdin'
+assert sum(len(a) + 1 for a in _cmd) < 30000, sum(len(a) + 1 for a in _cmd)          # real runs must stay under the Windows limit
+assert _seen['rules'].startswith('SYSTEM ') and 'mcpServers' in _seen['mcp'] and 'repogit' in _seen['mcp']['mcpServers']
+assert '--append-system-prompt' not in _cmd and _cmd.index('--allowedTools') > _cmd.index('--json-schema')   # variadic flag stays last
+assert not list(bot.RUN_DIR.glob('unit-*')), 'temp rules/mcp files must be removed after the run'
+_schema = _json.loads(_cmd[_cmd.index('--json-schema') + 1])
+assert 'rca' in _schema['properties'] and ' ' not in _cmd[_cmd.index('--json-schema') + 1][:20]
+# every backend repo the handbook lists is configured with its own default branch; gamification is the Next.js app, not a service
+for _n, _layer in (('mono-backend', 'be'), ('openim-server', 'be'), ('assistant-service', 'be'), ('recommender-service', 'be'),
+                   ('droppii-odoo', 'odoo'), ('gamification', 'fe')):
+    assert bot.REPO_LAYER.get(_n) == _layer, _n
+assert {k['name']: k['branch'] for k in bot.KNOWLEDGE_CFG}['recommender-service'] == 'main'
+assert {k['name']: k['branch'] for k in bot.KNOWLEDGE_CFG}['openim-server'] == 'dev'
+
 # created_at: ISO, epoch ms, missing (missing must NOT skip the 3-minute card wait)
 n = datetime(2026, 11, 6, 15, 0, tzinfo=bot.TZ)
 assert bot.created_at({'Date Created': '2026-11-06T14:58:00.000+07:00'}, n).minute == 58

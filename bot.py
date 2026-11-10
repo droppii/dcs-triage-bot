@@ -62,9 +62,12 @@ TICKET_FIELDS = ['Code', 'Title', 'Description', 'Priority', 'Product', 'Feature
                  'ReportedBy', 'Bot Status', 'Bot Thread'] + list(ATTACH.get('fields', []))
 
 ANCHORS_DIR = KNOWLEDGE_DIR / '_anchors'                  # route/error-code/table index made by tools/gen_anchors.py
-PLAYBOOKS_DIR = ROOT / 'agent' / 'playbooks'              # failure-class playbooks (versioned with the rules)
+PLAYBOOKS_SRC = ROOT / 'agent' / 'playbooks'              # failure-class playbooks, versioned with the rules
+PLAYBOOKS_DIR = ROOT / 'data' / 'playbooks'               # rendered copy (placeholders resolved) that the model reads
+RUN_DIR = ROOT / 'data' / 'run'                              # per-run rules / MCP config files (deleted after the run)
 ATTACH_DIR = ROOT / 'data' / 'attachments'                # ticket images downloaded for the brain (git-ignored)
 KNOWLEDGE_CFG = CFG['knowledge']
+REPO_LAYER = {k['name']: k.get('layer') for k in KNOWLEDGE_CFG}  # repo -> be | odoo | fe | mobile | docs
 KNOWLEDGE = [str(KNOWLEDGE_DIR / k['name']) for k in KNOWLEDGE_CFG]  # read-only clones made by tools/setup.sh
 READ_DIRS = KNOWLEDGE + [str(ANCHORS_DIR), str(PLAYBOOKS_DIR)] + ([str(ATTACH_DIR)] if ATTACH.get('fields') else [])
 
@@ -246,14 +249,36 @@ def mcp_config():
     }})
 
 
-def rules(path='agent/RULES.md'):
-    subs = {'{KNOWLEDGE}': str(KNOWLEDGE_DIR), '{ANCHORS}': str(ANCHORS_DIR), '{PLAYBOOKS}': str(PLAYBOOKS_DIR),
-            '{ENV_NAME}': ENV['name'], '{NR_PREFIX}': ENV['nr_prefix'], '{DB_PREFIX}': ENV['db_prefix'],
-            '{CODE_BRANCH}': ENV['code_branch'], '{DATA_NOTE}': ENV['data_note']}
-    text = (ROOT / path).read_text(encoding='utf-8')
+def product_map_text():
+    """config.json "products.map" -> bullet list for RULES.md: which layer / repo / client error tracker per Product."""
+    pm = (CFG.get('products') or {}).get('map') or {}
+    if not pm:
+        return '(chưa cấu hình: ghép theo tính năng trong ticket)'
+    return '\n'.join(f"- {name}: lớp {v.get('layer', '?')}; repo `{', '.join(v.get('repos', []))}`; "
+                     f"lỗi phía client: {v.get('tracker', '?')}{'' if v.get('confirmed') else ' (chưa xác nhận)'}"
+                     for name, v in pm.items())
+
+
+def render(text):
+    """Resolve {PLACEHOLDERS} from config.json (environment, paths, product map)."""
+    subs = {'{PRODUCT_MAP}': product_map_text(), '{KNOWLEDGE}': str(KNOWLEDGE_DIR), '{ANCHORS}': str(ANCHORS_DIR),
+            '{PLAYBOOKS}': str(PLAYBOOKS_DIR), '{ENV_NAME}': ENV['name'], '{NR_PREFIX}': ENV['nr_prefix'],
+            '{DB_PREFIX}': ENV['db_prefix'], '{CODE_BRANCH}': ENV['code_branch'], '{DATA_NOTE}': ENV['data_note']}
     for k, v in subs.items():
         text = text.replace(k, v)
     return text
+
+
+def render_playbooks():
+    """The model reads playbooks as plain files, so write copies with the placeholders already resolved."""
+    PLAYBOOKS_DIR.mkdir(parents=True, exist_ok=True)
+    for f in PLAYBOOKS_SRC.glob('*.md'):
+        (PLAYBOOKS_DIR / f.name).write_text(render(f.read_text(encoding='utf-8')), encoding='utf-8')
+
+
+def rules(path='agent/RULES.md'):
+    render_playbooks()
+    return render((ROOT / path).read_text(encoding='utf-8'))
 
 
 def claude_cmd(prompt, model):
@@ -296,18 +321,33 @@ def ticket_usage(code):
 
 
 def run_claude(prompt, system, schema_file, label, model=None, role='brain'):
-    """One read-only `claude -p` run. Returns the log path (full transcript = audit log of every tool call)."""
+    """One read-only `claude -p` run. Returns the log path (full transcript = audit log of every tool call).
+    Long inputs never go on the command line (Windows CreateProcess stops at ~32k characters: the rules, schema, tool list and a
+    long thread together exceed it): the prompt goes through stdin, the rules and MCP config through files."""
     cmd = claude_cmd(prompt, model or MODEL)
+    cmd.pop(cmd.index('-p') + 1)                                   # prompt -> stdin
+    RUN_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = f'{label}-{datetime.now(TZ):%Y%m%d-%H%M%S}'
+    rules_file, mcp_file = RUN_DIR / f'{stamp}-system.md', RUN_DIR / f'{stamp}-mcp.json'
+    rules_file.write_text(system, encoding='utf-8')
+    mcp_file.write_text(cmd[cmd.index('--mcp-config') + 1], encoding='utf-8')
+    cmd[cmd.index('--mcp-config') + 1] = str(mcp_file)
+    schema = json.dumps(json.loads((ROOT / schema_file).read_text(encoding='utf-8')), ensure_ascii=False, separators=(',', ':'))
     i = cmd.index('--allowedTools')  # variadic, so it must stay last; extra flags go before it
-    extra = ['--append-system-prompt', system, '--json-schema', (ROOT / schema_file).read_text(encoding='utf-8')]
+    extra = ['--append-system-prompt-file', str(rules_file), '--json-schema', schema]
     if MAX_BUDGET:
         extra += ['--max-budget-usd', str(MAX_BUDGET)]
     cmd[i:i] = extra
     LOGS.mkdir(exist_ok=True)
-    log = LOGS / f'{label}-{datetime.now(TZ):%Y%m%d-%H%M%S}.jsonl'
-    with open(log, 'w', encoding='utf-8') as f:
-        subprocess.run(cmd, cwd=ROOT / 'agent', stdout=f, stderr=subprocess.STDOUT, timeout=CLAUDE_TIMEOUT,
-                       env={**os.environ, 'USER': os.environ.get('USER') or getpass.getuser()})  # launchd: claude needs USER
+    log = LOGS / f'{stamp}.jsonl'
+    try:
+        with open(log, 'w', encoding='utf-8') as f:
+            subprocess.run(cmd, input=prompt, text=True, encoding='utf-8', cwd=ROOT / 'agent', stdout=f, stderr=subprocess.STDOUT,
+                           timeout=CLAUDE_TIMEOUT,
+                           env={**os.environ, 'USER': os.environ.get('USER') or getpass.getuser()})  # launchd: claude needs USER
+    finally:
+        for tmp in (rules_file, mcp_file):
+            tmp.unlink(missing_ok=True)
     record_usage(log, label, role)
     return log
 
@@ -341,7 +381,7 @@ def finalize_log(log, versions=None):
     Also used offline (tools/eval.py --from-log) to re-score a saved run."""
     res, tr = structured_result(log)
     out = res['structured_output']
-    rca.validate(out, tr, KNOWLEDGE_DIR)
+    rca.validate(out, tr, KNOWLEDGE_DIR, REPO_LAYER)
     out['_versions'] = versions if versions is not None else code_versions()
     out['_log'], out['_cost'] = log.name, res.get('total_cost_usd')
     out['_usage'] = usage.extract(res)

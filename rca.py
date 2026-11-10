@@ -5,7 +5,11 @@ citation against (a) the real files under knowledge/ and (b) the tool results re
 transcript (logs/*.jsonl), downgrades what it cannot verify, and decides whether the bot may conclude.
 """
 import json
+import os
 import re
+import subprocess
+import time
+from collections import defaultdict
 from pathlib import Path
 
 CODE_REF = re.compile(
@@ -18,13 +22,21 @@ DEFAULT_GATE = {
     'D': ['source_be', 'db', 'newrelic'],
     'C': ['code_location', 'runtime_signal', 'mechanism', 'alternatives'],
 }
-CHECK_LABEL = {'source_be': 'Code BE', 'db': 'DB', 'newrelic': 'New Relic', 'code_location': 'dòng code lỗi',
+CHECK_LABEL = {'source_be': 'Code', 'db': 'DB', 'newrelic': 'New Relic', 'code_location': 'dòng code lỗi',
                'runtime_signal': 'dấu hiệu runtime', 'mechanism': 'cơ chế + chuỗi nhân quả',
-               'alternatives': 'đã loại giả thuyết khác'}
+               'alternatives': 'đã loại giả thuyết khác', 'client_version': 'phiên bản app/bundle'}
+CODE_LAYERS = {'be', 'odoo', 'fe', 'mobile'}
+SAFE_REF = re.compile(r'^[\w./@+\-]{1,100}$')
 
 
 def norm(s):
     return re.sub(r'\s+', ' ', str(s or '')).strip()
+
+
+def loose(s):
+    """Comparison key for verbatim quotes: no whitespace, quotes or backslashes. The model writes these quotes inside a JSON
+    string where a stray `"` or `\\` breaks the whole answer, so it is told to avoid them and the check ignores them."""
+    return re.sub(r'[\s"\'`\\]+', '', str(s or ''))
 
 
 # ---------- transcript ----------
@@ -66,14 +78,32 @@ def _used(tr, prefix):
 
 
 def _haystack(tr):
-    r = tr['results']
-    return norm(r) + ' ' + norm(r.replace('\\"', '"').replace('\\n', ' ').replace('\\t', ' '))
+    """Every tool result, comparison-normalised (see loose())."""
+    return loose(tr['results'])
 
 
 # ---------- code citations ----------
 
+_NAMES = {'dir': None, 'at': 0.0, 'map': {}}
+_INDEX_SKIP = {'.git', 'node_modules', 'build', 'dist', '.next', 'Pods', '__pycache__', '.yarn'}
+
+
+def _by_name(kdir):
+    """basename -> [paths] under knowledge/ (cached 5 minutes: the clones are updated by setup.sh, not while a ticket runs)."""
+    if _NAMES['dir'] == str(kdir) and time.time() - _NAMES['at'] < 300:
+        return _NAMES['map']
+    m = defaultdict(list)
+    for dp, dns, fns in os.walk(kdir):
+        dns[:] = [d for d in dns if d not in _INDEX_SKIP]
+        for fn in fns:
+            m[fn].append(Path(dp) / fn)
+    _NAMES.update(dir=str(kdir), at=time.time(), map=m)
+    return m
+
+
 def resolve_path(ref, kdir):
-    """A cited path -> real file under knowledge/ (never outside it), else None."""
+    """A cited path -> real file under knowledge/ (never outside it), else None. A bare file name or a partial path
+    ("ClaimVoucherCommandHandler.java", "order/Cart.java") is accepted only when exactly ONE file matches."""
     kdir = Path(kdir)
     ref = ref.strip().strip('`').replace('\\', '/')
     cands = []
@@ -93,12 +123,37 @@ def resolve_path(ref, kdir):
             continue
         if c.is_file() and root in c.parents:
             return c
+    base = r.rsplit('/', 1)[-1]
+    if kdir.is_dir() and '.' in base and not Path(ref).is_absolute() and '..' not in r.split('/'):
+        hits = [c for c in _by_name(kdir).get(base, []) if c.as_posix().endswith('/' + r)]
+        if len(hits) == 1 and hits[0].is_file():
+            return hits[0].resolve()
     return None
 
 
-def check_code_ref(ref, start, end, snippet, kdir):
+def read_at_ref(path, at, kdir):
+    """File content at a tag / sha / branch of its own repo (`git show at:path`), or None. Used to check a citation
+    against the version the user actually runs (e.g. the tag of their app version) instead of the clone's HEAD."""
+    if not at or not SAFE_REF.match(at) or at.startswith('-') or '..' in at:
+        return None
+    try:
+        rel = Path(path).resolve().relative_to(Path(kdir).resolve())
+    except ValueError:
+        return None
+    if len(rel.parts) < 2:
+        return None
+    repo = Path(kdir).resolve() / rel.parts[0]
+    try:
+        p = subprocess.run(['git', '-C', str(repo), 'show', f"{at}:{'/'.join(rel.parts[1:])}"], capture_output=True, text=True,
+                           encoding='utf-8', errors='replace', timeout=30, env={**os.environ, 'GIT_TERMINAL_PROMPT': '0'})
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return p.stdout if p.returncode == 0 else None
+
+
+def check_code_ref(ref, start, end, snippet, kdir, at=''):
     """(ok, reason, path). The file must exist under knowledge/, the lines must be inside it, and a quoted
-    snippet must really appear at those lines (+-3 lines of slack)."""
+    snippet must really appear at those lines (+-3 lines of slack). `at` = check the file as of that tag/sha."""
     path = resolve_path(ref, kdir)
     if not path:
         return False, f'{ref}: file không có trong knowledge/', None
@@ -107,12 +162,18 @@ def check_code_ref(ref, start, end, snippet, kdir):
         end = int(end or start)
     except (TypeError, ValueError):
         return False, f'{ref}: số dòng không hợp lệ', path
-    lines = path.read_text(encoding='utf-8', errors='replace').splitlines()
+    if at:
+        text = read_at_ref(path, at, kdir)
+        if text is None:
+            return False, f'{ref}@{at}: không đọc được file ở ref này (tag/sha không có trong bản clone?)', path
+    else:
+        text = path.read_text(encoding='utf-8', errors='replace')
+    lines = text.splitlines()
     if not (1 <= start <= end <= len(lines)):
         return False, f'{ref}:{start}-{end}: dòng ngoài phạm vi file ({len(lines)} dòng)', path
     if snippet and norm(snippet):
-        window = norm(' '.join(lines[max(0, start - 1 - 3):end + 3]))
-        parts = [norm(p) for p in re.split(r'\.\.\.|…', snippet) if len(norm(p)) >= 4]
+        window = loose(' '.join(lines[max(0, start - 1 - 3):end + 3]))
+        parts = [loose(p) for p in re.split(r'\.\.\.|…', snippet) if len(loose(p)) >= 4]
         if any(p not in window for p in parts):
             return False, f'{ref}:{start}-{end}: đoạn trích không khớp nội dung dòng', path
     return True, '', path
@@ -120,7 +181,7 @@ def check_code_ref(ref, start, end, snippet, kdir):
 
 # ---------- validation (downgrades what cannot be verified) ----------
 
-def validate(out, tr, kdir):
+def validate(out, tr, kdir, layers=None):
     """Re-check the model's claims against disk and the transcript. Mutates `out` (statuses are downgraded,
     `verified` flags are set) and returns the list of problems found."""
     problems = []
@@ -129,13 +190,30 @@ def validate(out, tr, kdir):
 
     # code location
     loc = rca.get('code_location') or {}
-    loc_ok = False
+    loc_ok, lpath = False, None
     if loc.get('file'):
-        loc_ok, why, _ = check_code_ref(loc['file'], loc.get('line_start'), loc.get('line_end'), loc.get('snippet'), kdir)
+        loc_ok, why, lpath = check_code_ref(loc['file'], loc.get('line_start'), loc.get('line_end'), loc.get('snippet'), kdir,
+                                            at=(loc.get('ref') or '').strip())
         if not loc_ok:
             problems.append('code_location: ' + why)
     loc['verified'] = loc_ok
     rca['code_location'] = loc
+
+    # layer: the repo that holds the cited line decides (be / odoo / fe / mobile); the model's claim is only a hint
+    derived = None
+    if loc_ok and layers and lpath:
+        repo = ''
+        try:
+            repo = Path(lpath).resolve().relative_to(Path(kdir).resolve()).parts[0]
+            derived = layers.get(repo)
+        except ValueError:
+            pass
+        claim = rca.get('layer')
+        if derived in CODE_LAYERS:
+            if claim in CODE_LAYERS and claim != derived:
+                problems.append(f'layer: model nói {claim} nhưng dòng code ở repo {repo} (lớp {derived}); bot dùng {derived}')
+            rca['layer'] = derived
+    rca['layer_derived'] = derived
 
     # source_be: every path:line cited must be real
     sb = ev.get('source_be') or {}
@@ -161,7 +239,7 @@ def validate(out, tr, kdir):
     sig = rca.get('decisive_signal') or {}
     sig_ok = False
     if sig.get('observed'):
-        q = norm(sig.get('quote'))
+        q = loose(sig.get('quote'))
         sig_ok = len(q) >= 8 and q in _haystack(tr)
         if not sig_ok:
             problems.append('decisive_signal: câu trích không có trong kết quả tool')
@@ -185,6 +263,9 @@ def check_ok(out, name):
         return bool((rca.get('decisive_signal') or {}).get('verified'))
     if name == 'mechanism':
         return bool(norm(rca.get('mechanism'))) and bool(rca.get('causal_chain'))
+    if name == 'client_version':  # mobile runs many versions at once: the code read must be tied to the version that failed
+        v = norm(rca.get('client_version')).casefold()
+        return bool(v) and not v.startswith('không rõ')
     if name == 'alternatives':
         alts = rca.get('alternatives') or []
         return bool(alts) and not any(a.get('status') == 'supported' for a in alts)
@@ -192,7 +273,10 @@ def check_ok(out, name):
 
 
 def gate_failures(out, gate=None):
-    return [n for n in (gate or DEFAULT_GATE).get(out['type'], []) if not check_ok(out, n)]
+    names = list((gate or DEFAULT_GATE).get(out['type'], []))
+    if out['type'] == 'C' and (out.get('rca') or {}).get('layer') == 'mobile' and 'client_version' not in names:
+        names.append('client_version')  # always required for a mobile bug, whatever config.json says
+    return [n for n in names if not check_ok(out, n)]
 
 
 def gated(out, gate=None):
@@ -217,14 +301,14 @@ def has_candidate(out):
 
 # ---------- rendering ----------
 
-def permalink(path, start, end, versions, knowledge, kdir):
+def permalink(path, start, end, versions, knowledge, kdir, ref=''):
     try:
         rel = Path(path).resolve().relative_to(Path(kdir).resolve())
     except ValueError:
         return ''
     repo, sub = rel.parts[0], '/'.join(rel.parts[1:])
     k = next((x for x in knowledge if x['name'] == repo), None)
-    sha = (versions or {}).get(repo, {}).get('sha')
+    sha = ref or (versions or {}).get(repo, {}).get('sha')
     if not k or not sha:
         return ''
     base = k['url'][:-4] if k['url'].endswith('.git') else k['url']
@@ -248,17 +332,22 @@ def render_rca(out, knowledge, kdir, confirmed):
     if loc.get('verified'):
         path = resolve_path(loc['file'], kdir)
         rng = f"{loc['line_start']}-{loc['line_end']}" if loc['line_end'] != loc['line_start'] else str(loc['line_start'])
-        link = permalink(path, loc['line_start'], loc['line_end'], versions, knowledge, kdir) if path else ''
+        link = permalink(path, loc['line_start'], loc['line_end'], versions, knowledge, kdir, loc.get('ref') or '') if path else ''
         name = f"{loc['file']}:{rng}"
         L.append(f"- Code: {'[' + name + '](' + link + ')' if link else '`' + name + '`'}"
                  + (f" · `{loc['symbol']}`" if loc.get('symbol') else ''))
         L += ['  ' + x for x in _fence(loc.get('snippet'))]
+        layer = rca.get('layer')
+        if layer and layer != 'unknown':
+            L.append(f"- Lớp lỗi: {layer}" + (f" (code đọc ở {loc['ref']})" if loc.get('ref') else ''))
     sig = rca.get('decisive_signal') or {}
     if sig.get('verified'):
         L.append(f"- Dấu hiệu runtime: {sig.get('what', '')} — {sig.get('source', '')} {sig.get('at', '')}".rstrip())
         L.append(f"  > {norm(sig.get('quote'))[:300]}")
     elif sig.get('observed'):
         L.append('- Dấu hiệu runtime: model nêu nhưng bot KHÔNG tìm thấy câu trích trong kết quả tool (bỏ qua)')
+    if norm(rca.get('client_version')):
+        L.append(f"- Phiên bản client: {norm(rca['client_version'])}")
     if norm(rca.get('mechanism')):
         L.append(f"- Cơ chế: {norm(rca['mechanism'])}")
     chain = rca.get('causal_chain') or []

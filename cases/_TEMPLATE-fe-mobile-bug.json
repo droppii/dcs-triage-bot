@@ -1,0 +1,43 @@
+{
+ "_readme": "Mẫu case bug ở FE hoặc MOBILE có đáp án, dựng từ bug Jira đã đóng có PR fix ở repo client (biz-mobile, customer-mobile, web-mall, b2b-client…). code_location lấy từ diff của PR. Với mobile ghi rõ phiên bản app mà bug xảy ra và `ref` (tag) vì dòng lỗi có thể không còn ở HEAD. Đổi tên file bỏ dấu _ để eval chạy. Dùng dữ liệu staging, không chép dữ liệu production.",
+ "ticket": {
+  "Title": "...",
+  "Description": "Như người vận hành báo: màn hình, thao tác, chuỗi UI nhìn thấy, tài khoản test, giờ gần đúng, phiên bản app nếu biết. KHÔNG nêu nguyên nhân.",
+  "Priority": "Medium",
+  "Product": "Biz App",
+  "Feature": "...",
+  "ReportedBy": "QA test"
+ },
+ "expect": {
+  "verdict_any_of": [
+   "C"
+  ],
+  "layer": "mobile",
+  "code_location": {
+   "file_suffix": "src/.../TênFile.tsx",
+   "line_range": [
+    100,
+    110
+   ]
+  },
+  "must_contain": [
+   "chuỗi UI hoặc mã lỗi nguyên văn",
+   "TênHàm"
+  ],
+  "forbidden_conclusions": [
+   "giả thuyết hiển nhiên nhưng SAI (vd: lỗi do backend trong khi API trả đúng)"
+  ],
+  "sentinel": true,
+  "max_tool_calls": 60,
+  "max_cost_usd": 1.5,
+  "ground_truth": {
+   "jira": "BUG-123",
+   "fix_pr": "https://github.com/droppii/biz-mobile/pull/...",
+   "root_cause": "1-2 câu: vì sao vỡ",
+   "app_version": "3.x.x (iOS, bundle CodePush vNN)",
+   "fixed_in": "tag hoặc ngày"
+  },
+  "valid_until": "YYYY-MM-DD (Bugsnag/Sentry/New Relic giữ dữ liệu có hạn; sau đó dùng evals/fixtures qua --from-fixtures)"
+ },
+ "created": "YYYY-MM-DD"
+}

@@ -181,4 +181,104 @@ hits = priorart.similar({'Title': 'Không lưu được voucher KM03', 'Descript
 assert [h['code'] for h in hits] == ['D1'] and 'đúng thiết kế' in hits[0]['resolution'], hits   # open/unresolved ones excluded
 assert priorart.similar({'Title': '', 'Description': ''}, rows, F, {'Done'}) == []
 
+# ===== FE / mobile: layer from the repo, version-pinned citations, client_version gate =====
+import subprocess
+MOB = K / 'biz-mobile'
+MOB.mkdir()
+def mg(*a):
+    subprocess.run(['git', '-C', str(MOB), '-c', 'user.name=T', '-c', 'user.email=t@x.io', *a], check=True, capture_output=True)
+mg('init', '-q', '-b', 'main')
+(MOB / 'src').mkdir()
+cart = MOB / 'src/CartScreen.tsx'
+cart.write_text('export function Cart() {\n  const id = cart.warehouse.uuid;\n  return id;\n}\n', encoding='utf-8')   # released code
+mg('add', '.'); mg('commit', '-qm', 'v3.12.0'); mg('tag', 'v3.12.0')
+cart.write_text('// refactor\nexport function Cart() {\n  const id = cart.warehouse?.uuid;\n  return id;\n}\n', encoding='utf-8')  # HEAD differs
+mg('commit', '-qam', 'refactor')
+LAYERS = {'mono-backend': 'be', 'biz-mobile': 'mobile'}
+
+
+def mobile(**loc_over):
+    o = make()
+    o['rca']['layer'] = 'be'                                  # the model guessed wrong
+    o['rca']['code_location'] = {'file': 'biz-mobile/src/CartScreen.tsx', 'line_start': 2, 'line_end': 2, 'symbol': 'Cart',
+                                 'snippet': 'cart.warehouse.uuid', 'ref': 'v3.12.0'} | loc_over
+    o['rca']['client_version'] = 'Biz Mobile 3.12.0 iOS, bundle CodePush v45, releaseStage staging (Bugsnag)'
+    return o
+
+
+# the cited line only exists in the released tag, not in HEAD: it verifies at ref, fails without it
+o = mobile()
+probs = rca.validate(o, tr, K, LAYERS)
+assert o['rca']['code_location']['verified'], probs
+assert o['rca']['layer'] == 'mobile' and o['rca']['layer_derived'] == 'mobile'              # repo decides, claim overridden
+assert any(p.startswith('layer:') and 'be' in p for p in probs), probs                      # and the mismatch is reported
+o2 = mobile(ref='')
+rca.validate(o2, tr, K, LAYERS)
+assert not o2['rca']['code_location']['verified']                                           # HEAD has uuid?. not uuid
+for bad_ref in ('v9.9.9', '--output=/tmp/pwn', 'v3.12.0..main', '-p'):
+    o3 = mobile(ref=bad_ref)
+    rca.validate(o3, tr, K, LAYERS)
+    assert not o3['rca']['code_location']['verified'], bad_ref
+
+# mobile bug needs the client version, even though config gate for C does not list it
+o = mobile()
+rca.validate(o, tr, K, LAYERS)
+assert rca.gate_failures(o) == [] and rca.verdict(o) == 'C'
+for v in ('', 'không rõ: Bugsnag không có sự kiện của người dùng này'):
+    o = mobile()
+    o['rca']['client_version'] = v
+    rca.validate(o, tr, K, LAYERS)
+    assert rca.gate_failures(o) == ['client_version'] and rca.verdict(o) == '?', v
+# an FE (web) bug is not forced to state a client version; neither is BE
+o = make()
+o['rca']['layer'] = 'be'
+rca.validate(o, tr, K, LAYERS)
+assert rca.verdict(o) == 'C' and o['rca']['layer'] == 'be' and o['rca']['layer_derived'] == 'be'
+# without a layers map nothing changes (older callers)
+o = make()
+rca.validate(o, tr, K)
+assert o['rca']['layer_derived'] is None and rca.verdict(o) == 'C'
+
+# rendering: layer, client version, link pinned to the released tag instead of the clone's HEAD
+o = mobile()
+rca.validate(o, tr, K, LAYERS)
+o['_versions'] = {'biz-mobile': {'sha': 'c' * 40, 'branch': 'main', 'date': '2026-11-09'}}
+know2 = know + [{'name': 'biz-mobile', 'url': 'https://github.com/droppii/biz-mobile.git', 'branch': 'main'}]
+text = '\n'.join(rca.render_rca(o, know2, K, confirmed=True))
+assert 'Lớp lỗi: mobile (code đọc ở v3.12.0)' in text and 'Phiên bản client: Biz Mobile 3.12.0' in text, text
+assert 'https://github.com/droppii/biz-mobile/blob/v3.12.0/src/CartScreen.tsx#L2' in text, text
+assert 'phiên bản app/bundle' == rca.CHECK_LABEL['client_version']
+
+# --- a bare file name / partial path resolves only when exactly one file matches (models often cite "Foo.java:73") ---
+(K / 'mono-backend/y').mkdir(); (K / 'biz-mobile/z').mkdir()
+(K / 'mono-backend/y/Dup.java').write_text('class A {}\n'); (K / 'biz-mobile/z/Dup.java').write_text('class B {}\n')
+(K / 'mono-backend/y/Uniq.java').write_text('class U {}\n')
+rca._NAMES['dir'] = None                                                  # fixtures were added after the cached index
+assert rca.resolve_path('CartServiceImpl.java', K) == JAVA.resolve()
+assert rca.resolve_path('Uniq.java', K) == (K / 'mono-backend/y/Uniq.java').resolve()
+assert rca.resolve_path('order/CartServiceImpl.java', K) == JAVA.resolve()
+assert rca.resolve_path('Dup.java', K) is None                            # ambiguous: refuse, do not guess
+assert rca.resolve_path('y/Dup.java', K) == (K / 'mono-backend/y/Dup.java').resolve()   # disambiguated by a partial path
+assert rca.resolve_path('Nope.java', K) is None and rca.resolve_path('../Uniq.java', K) is None
+sbare = make()
+sbare['evidence']['source_be']['detail'] = 'CartServiceImpl.java:40 gọi getUuid'                # no directory, as the model often writes
+sbare['rca']['code_location']['file'] = 'CartServiceImpl.java'
+rca.validate(sbare, tr, K)
+assert sbare['evidence']['source_be']['status'] == 'confirmed' and sbare['rca']['code_location']['verified'], sbare['_problems']
+
+# --- loose comparison: quotes / backslashes / whitespace do not matter (they break the model's JSON, so it is told to drop them) ---
+assert rca.loose(' a "b" \\ x `c` ') == 'abxc' and rca.loose("it's") == 'its'
+q2 = make()
+q2['rca']['decisive_signal']['quote'] = 'Cannot invoke Warehouse.getUuid() because w is null'        # quotes dropped by the model
+rca.validate(q2, tr, K)
+assert q2['rca']['decisive_signal']['verified']
+q3 = make()
+q3['rca']['code_location']['snippet'] = 'String id = cart.getWarehouse().getUuid();'                  # the file line has the same code
+rca.validate(q3, tr, K)
+assert q3['rca']['code_location']['verified']
+q4 = make()
+q4['rca']['decisive_signal']['quote'] = 'Cannot invoke Warehouse.getName() because w is null'        # a different method: still rejected
+rca.validate(q4, tr, K)
+assert not q4['rca']['decisive_signal']['verified']
+
 print('ok rca')
