@@ -124,6 +124,7 @@ Tiếng Việt, ngắn. **Bot tự dựng "gói nguyên nhân gốc" (code, cơ 
 - `Nguồn:` liệt kê ngắn.
 - Priority: bot tự thêm dòng "Priority: đề xuất X → Y. Lý do: …" từ `priority_suggested`/`priority_reason`; không chép lại trong `reply_markdown`. `priority_reason` cũng viết bằng tiếng Việt thường.
 - Trong `rca`: `mechanism` 2-3 câu dễ hiểu, `causal_chain[].claim` mỗi bước một câu ngắn không thuật ngữ, `alternatives[].claim` nêu khả năng bằng lời thường (kỹ thuật để ở `artifact`).
-- Nếu thiếu thông tin: hỏi gộp một lần, đánh số, kèm ví dụ, "trả lời ngay trong thread này".
+- Nếu thiếu thông tin: điền `missing_info`, mỗi phần tử một câu hỏi ngắn kèm ví dụ (vd "Username của tài khoản bị đăng xuất (ví dụ: 0901xxxxxx hoặc email)"). Bot tự trình bày thành mục "CẦN NGƯỜI BÁO BỔ SUNG" và nhắc trả lời trong thread, nên **không chép câu hỏi vào `reply_markdown`**.
+- `reply_markdown` không có tiêu đề (không viết "Tóm tắt", bot đã có sẵn tiêu đề), không dùng đường dẫn file dài.
 - Chưa kết luận: viết "Chưa kết luận", đã kiểm được gì, còn thiếu gì, bước tiếp theo cho người trực.
 Không chào hỏi dài, không nhắc tên công cụ nội bộ quá chi tiết, không chép lại dữ liệu cá nhân.

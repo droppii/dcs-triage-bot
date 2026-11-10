@@ -25,6 +25,14 @@ assert rca.resolve_path(str(OUTSIDE), K) is None
 # --- check_code_ref ---
 good = rca.check_code_ref('mono-backend/java/order/CartServiceImpl.java', 40, 40, 'cart.getWarehouse().getUuid()', K)
 assert good[0], good
+# the reply shows the real surrounding code (numbered, cited line marked), not only the model's 1-3 line snippet
+_ex = rca.code_excerpt(JAVA, 40, 40, '', K)
+assert _ex[0] == '```' and _ex[-1] == '```' and '> 40 |     String id = cart.getWarehouse().getUuid();   // line 40' in _ex, _ex
+assert '  35 | // line 35' in _ex and '  41 |     return find(id);' in _ex and '  34 | // line 34' not in _ex, _ex   # 5 lines of context each side, file ends at 41
+assert len(rca.code_excerpt(JAVA, 5, 39, '', K)) <= 22                                 # long ranges are capped (20 lines + fence)
+assert rca.code_excerpt(JAVA, 500, 500, '', K) == [] and rca.code_excerpt(K / 'nope.java', 1, 1, '', K) == []
+assert rca._short('mono-backend/csharp/services/identity-service/Seed/ConfigClient.cs:250') == 'ConfigClient.cs:250'
+assert rca._short('ticket D1110-015') == 'ticket D1110-015' and rca._short('stg_order.order_payment') == 'stg_order.order_payment'
 assert not rca.check_code_ref('mono-backend/java/order/CartServiceImpl.java', 40, 40, 'somethingElse()', K)[0]
 assert not rca.check_code_ref('mono-backend/java/order/CartServiceImpl.java', 500, 500, '', K)[0]
 assert not rca.check_code_ref('mono-backend/java/order/Nope.java', 1, 1, '', K)[0]
@@ -146,6 +154,11 @@ finally:
     bot.KNOWLEDGE_DIR = old_k
 assert '**Loại:** `? - Không chắc`' in r and '**NGUYÊN NHÂN:**' in r and 'CartServiceImpl.java:40' in r and '**Giao cho:** Dev C' in r, r
 assert '**Đã loại các khả năng khác:** `✗`' in r, r
+assert '> 40 |' in r and '  35 | // line 35' in r, r                  # the real code around the cited line, not only the model's snippet
+assert 'mono-backend/java/order/CartServiceImpl.java:40' not in r, r   # shown as file name + repo, not the whole path
+assert rca.shorten_paths('xem mono-backend/java/order/CartServiceImpl.java:40 getUuid') == 'xem CartServiceImpl.java:40 getUuid'
+assert rca.shorten_paths('https://github.com/droppii/web-mall/pull/3') == 'https://github.com/droppii/web-mall/pull/3'
+assert 'CÁC BƯỚC DẪN TỚI LỖI' not in r or len(o['rca']['causal_chain']) >= 3, r   # a short chain is not repeated when unconfirmed
 
 # --- bot.finalize_log: a saved transcript -> verified result (same path eval --from-log uses) ---
 good = make()

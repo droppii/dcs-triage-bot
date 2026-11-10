@@ -586,13 +586,35 @@ def verdict(out):
     return rca.verdict(out, GATE)
 
 
+_HEADING = re.compile(r'^[\s*#_>-]*(tóm tắt|summary)[\s*:#_]*$', re.I)
+_ASK = re.compile(r'(vui lòng )?trả lời (ngay )?trong thread', re.I)
+
+
+def clean_summary(text, has_questions):
+    """The model's reply_markdown without what the bot already draws: its own "Tóm tắt" heading (the section has one)
+    and, when missing_info is set, the numbered questions (the bot prints them in their own section)."""
+    lines = (text or '').strip().splitlines()
+    while lines and (not lines[0].strip() or _HEADING.match(lines[0].strip())):
+        lines.pop(0)
+    if has_questions:
+        for i, l in enumerate(lines):
+            if _ASK.search(l):
+                lines = lines[:i]
+                break
+    return '\n'.join(lines).strip()
+
+
 def compose_reply(out, ticket, person, baqa):
     """Same form as the Jira triage cards: UPPERCASE title, "- **Label:** `value` (confidence) — *reason*" bullets."""
     eff = verdict(out)
     pct = lambda c: f" ({round(float(c) * 100)}%)" if isinstance(c, (int, float)) else ''
     lines = [f"✨ **{LABEL} DCS Triage Bot — kết quả phân tích.**"]
-    if out['reply_markdown'].strip():
-        lines += ['', '**TÓM TẮT:**', out['reply_markdown'].strip()]
+    summary = clean_summary(out['reply_markdown'], bool(out['missing_info']))
+    if summary:
+        lines += ['', '**TÓM TẮT:**', summary]
+    if out['missing_info']:   # the bot lays the questions out itself, so the model's copy of them is dropped from the summary
+        lines += ['', '**CẦN NGƯỜI BÁO BỔ SUNG:**'] + [f"{i}. {m}" for i, m in enumerate(out['missing_info'], 1)]
+        lines.append('*Trả lời ngay trong thread này.*')
     verdict_line = f"- **Loại:** `{TYPE_LABEL[eff]}`"
     if eff != out['type']:
         miss = [rca.CHECK_LABEL.get(n, n) for n in rca.gate_failures(out, GATE)]
@@ -614,7 +636,7 @@ def compose_reply(out, ticket, person, baqa):
         lines += ['', '**ĐÃ KIỂM TRA:**']
         for k, name in CHECKS:
             ev = out['evidence'][k]
-            detail = sanitize(str(ev.get('detail') or '')).replace('*', '')[:200]
+            detail = rca.shorten_paths(sanitize(str(ev.get('detail') or '')).replace('*', ''))[:200]
             lines.append(f"- **{name}:** `{MARK[ev['status']]}`" + (f" — *{detail}*" if detail else ''))
         if out['type'] == 'C':
             lines += [f"- **{rca.CHECK_LABEL[n][:1].upper() + rca.CHECK_LABEL[n][1:]}:** `{'✓' if rca.check_ok(out, n) else '✗'}`"

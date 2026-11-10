@@ -220,6 +220,14 @@ print('ok gate')
 hi = {**weak, 'type': '?', 'missing_info': ['mã đơn'], 'priority_suggested': 'High'}
 assert '**Giao cho:** Dev C' in bot.compose_reply(hi, {'Priority': ['High']}, 'Dev C', 'BA D')
 assert 'Giao cho' not in bot.compose_reply({**hi, 'priority_suggested': 'Low'}, {'Priority': ['Low']}, 'Dev C', 'BA D')
+
+# the bot draws the "Tóm tắt" heading and the questions itself: the model's copies are removed from the summary
+assert bot.clean_summary('**Tóm tắt**\n\nNgười dùng bị đăng xuất.\nVui lòng trả lời ngay trong thread này:\n1. Username?', True) == 'Người dùng bị đăng xuất.'
+assert bot.clean_summary('Tóm tắt\nA.\nVui lòng trả lời ngay trong thread này:', False).startswith('A.')   # no missing_info: text kept
+_q = bot.compose_reply({**hi, 'reply_markdown': '**Tóm tắt**\nA.\nVui lòng trả lời trong thread này:\n1. cũ', 'missing_info': ['Username (vd: 0901)', 'Giờ']},
+                       {'Priority': ['High']}, 'Dev C', 'BA D')
+assert _q.count('TÓM TẮT') == 1 and 'Tóm tắt' not in _q and '1. cũ' not in _q, _q
+assert '**CẦN NGƯỜI BÁO BỔ SUNG:**' in _q and '1. Username (vd: 0901)' in _q and '2. Giờ' in _q, _q
 print('ok high routing')
 
 # lark-cli errors arrive on stderr (429 rate limit) and must still be parsed so the retry kicks in

@@ -346,6 +346,42 @@ def _fence(snippet, limit=6):
     return ['```', *lines, '```'] if lines else []
 
 
+def code_excerpt(path, start, end, at, kdir, context=5, cap=20, width=120):
+    """The real lines around a verified citation, numbered, cited lines marked '>' (fenced block, as lines).
+    Read from the file itself (or from `at`, the tag/sha it was verified at), not from the model's `snippet`,
+    which the schema cuts to 1-3 JSON-safe lines. [] when the file cannot be read."""
+    try:
+        text = read_at_ref(path, at, kdir) if at else Path(path).read_text(encoding='utf-8', errors='replace')
+        lines = (text or '').expandtabs(4).splitlines()
+        s, e = int(start), int(end or start)
+    except (OSError, TypeError, ValueError):
+        return []
+    if not (1 <= s <= e <= len(lines)):
+        return []
+    lo, hi = max(1, s - context), min(len(lines), e + context)
+    hi = min(hi, lo + cap - 1)
+    shown = lines[lo - 1:hi]
+    indent = min((len(l) - len(l.lstrip()) for l in shown if l.strip()), default=0)
+    w = len(str(hi))
+    body = [f"{'>' if s <= i <= e else ' '} {i:>{w}} | {shown[i - lo][indent:].rstrip()[:width].replace('```', chr(39) * 3)}"
+            for i in range(lo, hi + 1)]
+    return ['```', *body, '```']
+
+
+_PATH_IN_TEXT = re.compile(r'(?<![\w:/.@+\-])(?:[\w.@+\-\[\]()]+/){2,}([\w.@+\-\[\]()]+(?::\d+(?:-\d+)?)?)')
+
+
+def shorten_paths(text):
+    """Free text with 'repo/a/b/File.cs:51' inside -> 'File.cs:51' (URLs are left alone)."""
+    return _PATH_IN_TEXT.sub(r'\1', text or '')
+
+
+def _short(artifact):
+    """'repo/a/b/c/File.cs:51' -> 'File.cs:51' (full paths made the reply unreadable); anything else unchanged."""
+    a = norm(artifact)
+    return re.sub(r'^(?:[\w.@+\-\[\]()]+/)+([\w.@+\-\[\]()]+(?::\d+(?:-\d+)?)?)$', r'\1', a)
+
+
 def _plain(x):
     """Keep model text from breaking the bold/italic/code markup around it."""
     return norm(x).replace('*', '').replace('`', "'")
@@ -368,10 +404,12 @@ def render_rca(out, knowledge, kdir, confirmed):
         path = resolve_path(loc['file'], kdir)
         rng = f"{loc['line_start']}-{loc['line_end']}" if loc['line_end'] != loc['line_start'] else str(loc['line_start'])
         link = permalink(path, loc['line_start'], loc['line_end'], versions, knowledge, kdir, loc.get('ref') or '') if path else ''
-        name = f"{loc['file']}:{rng}"
+        name = f"{Path(loc['file']).name}:{rng}"
+        repo = Path(loc['file']).parts[0] if len(Path(loc['file']).parts) > 1 else ''
         L.append(f"- **Code liên quan:** {'[' + name + '](' + link + ')' if link else '`' + name + '`'}"
-                 + (f" · `{loc['symbol']}`" if loc.get('symbol') else ''))
-        L += ['  ' + x for x in _fence(loc.get('snippet'))]
+                 + (f" · `{loc['symbol']}`" if loc.get('symbol') else '') + (f" · *{repo}*" if repo else ''))
+        L += ['  ' + x for x in (code_excerpt(path, loc['line_start'], loc['line_end'], (loc.get('ref') or '').strip(), kdir) if path else [])
+              or _fence(loc.get('snippet'))]
     if sig.get('verified'):
         L.append(f"- **Bằng chứng từ log:** {_plain(sig.get('what', ''))} — *{_plain(sig.get('source', ''))} {_plain(sig.get('at', ''))}*".rstrip())
         L.append(f"  > {norm(sig.get('quote'))[:300]}")
@@ -385,9 +423,10 @@ def render_rca(out, knowledge, kdir, confirmed):
         L.append('- **Ảnh hưởng:** ' + '; '.join(_plain(x) for x in rca['blast_radius']))
     if norm(rca.get('introduced_by')):
         L.append(f"- **Do commit:** {_plain(rca['introduced_by'])}")
-    if chain:
+    # a 1-2 step chain only repeats the summary: show it when the cause is confirmed or the chain says something new
+    if chain and (confirmed or len(chain) >= 3):
         L += ['', '**CÁC BƯỚC DẪN TỚI LỖI:**']
-        L += [f"{i}. {_plain(c.get('claim'))} — *{_plain(c.get('artifact'))}*" for i, c in enumerate(chain, 1)]
+        L += [f"{i}. {_plain(c.get('claim'))} — *{_plain(_short(c.get('artifact')))}*" for i, c in enumerate(chain, 1)]
     alts = rca.get('alternatives') or []
     if alts:
         mark = {'refuted': '✗ đã loại', 'supported': '✓ vẫn nghi', 'unverified': '? chưa kiểm tra'}
@@ -398,7 +437,7 @@ def render_rca(out, knowledge, kdir, confirmed):
              ('failing_test_idea', 'Test gợi ý'), ('jira_title', 'Tiêu đề Jira gợi ý')) if norm(rca.get(key))]
     if todo:
         L += ['', '**VIỆC CẦN LÀM TIẾP:**'] + todo
-    if rca.get('could_not_confirm'):
+    if rca.get('could_not_confirm') and not out.get('missing_info'):   # with missing_info the questions are already asked above
         L += ['', '**CHƯA XÁC NHẬN ĐƯỢC:**'] + [f"- {_plain(x)}" for x in rca['could_not_confirm']]
     # `versions` lists every clone, not what was read: show only repos the RCA actually cites (code_location / chain artifacts),
     # otherwise a ticket that read one repo is reported as having read all twelve.
@@ -420,7 +459,7 @@ def render_rca(out, knowledge, kdir, confirmed):
     if out.get('_problems'):
         tech.append('- **Bot hạ trạng thái** vì trích dẫn không kiểm chứng được: ' + ' | '.join(_plain(p) for p in out['_problems'][:4]))
     if tech:
-        L += ['', '**THÔNG TIN KỸ THUẬT (cho dev):**'] + tech
+        L += ['', '──────────', '**THÔNG TIN KỸ THUẬT (cho dev):**'] + tech
     return L
 
 
