@@ -83,6 +83,7 @@ Gói cho người trực (loại C hoặc ứng viên chưa đủ bằng chứng
 | `tools/gen_anchors.py`, `tools/anchors_client.py` | Sinh `knowledge/_anchors/`: backend (service, route → handler, mã lỗi, bảng, SHA đã clone) và client (chuỗi UI, lời gọi API, màn hình, cạnh client → backend, mã lỗi ↔ chuỗi UI) |
 | `tools/repo_git_mcp.py` | MCP git chỉ đọc (`git_head/log/blame/show/tags/file`; `ref` để đọc code đúng phiên bản app) cho các bản clone |
 | `tools/eval.py` | Chạy case N lần, chấm điểm, so baseline |
+| `tools/eval_closed.py` | Giai đoạn 1a: phân loại ticket DCS đã đóng chỉ từ nội dung (không tool), so với RC Category của dev |
 | `usage.py`, `tools/usage_report.py` | Ghi và tổng hợp token/chi phí mỗi lần phân tích |
 | `tools/dbhub-stg.py` | Chạy DBHub trên Postgres staging, read-only |
 | `tools/check_sandbox.py` | Kiểm lớp chặn quyền |
@@ -111,6 +112,7 @@ python3 bot.py --once                                    # 1 lượt trên sandb
 
 python3 tools/eval.py --runs 3                           # chấm cả bộ case (tốn tiền), so với evals/baseline.json
 python3 tools/eval.py --from-log cases/X.json=logs/Y.jsonl   # chấm lại một lần chạy đã lưu, không gọi model
+python3 tools/eval_closed.py data/<export>.ndjson --n 100  # giai đoạn 1a; export Base DCS để trong data/ (không commit)
 ```
 
 Windows: dùng `python` thay `python3`; chạy `tools/setup.sh` bằng Git Bash. Đặt `PYTHONIOENCODING=utf-8` nếu terminal báo lỗi mã hóa.
@@ -137,6 +139,10 @@ Windows: dùng `python` thay `python3`; chạy `tools/setup.sh` bằng Git Bash.
 | `stg-voucher-no-code`, `stg-order-stuck-no-code` | (không điều tra) | Chỉ hỏi mã tham chiếu và thời điểm; ticket High vẫn chuyển người trực |
 
 Chi phí khoảng $0,03–0,7 mỗi ticket (sonnet). Cùng một case có thể ra kết luận khác nhau giữa các lần chạy, nên khi đánh giá cần chạy nhiều lần.
+
+### Giai đoạn 1a (06/11/2026): 100 ticket đã đóng, chỉ đọc nội dung
+
+`tools/eval_closed.py`, 100 ticket đóng gần nhất có RC Category (21/08–28/10/2026), sonnet, $0,47. Chỉ từ nội dung, bot **không phân biệt được "Not a bug" với bug** (21/29 ticket Not a bug bị xếp là bug), nhưng an toàn: chỉ 1/24 bug thật bị xếp là tra cứu. Muốn bot tự trả lời thì phải có bằng chứng dữ liệu và runtime, không thể chỉ đọc chữ.
 
 ## Chi phí: cái gì thật sự tốn tiền (đo 10/11/2026)
 

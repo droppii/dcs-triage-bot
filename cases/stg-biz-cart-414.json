@@ -1,0 +1,26 @@
+{
+ "ticket": {
+  "Title": "App Biz mở giỏ hàng báo lỗi, không hiện sản phẩm",
+  "Description": "Đối tác dinhvan365 mở giỏ hàng trên app Biz (bản staging) thì app báo lỗi, không tải được sản phẩm trong giỏ. Bị nhiều lần, gần nhất khoảng 20h40 ngày 06/11. Nhờ check giúp.",
+  "Priority": "High",
+  "Product": "Biz App",
+  "Feature": "Đơn hàng",
+  "ReportedBy": "QA test"
+ },
+ "expect": {
+  "verdict_any_of": ["C"],
+  "must_contain": ["414", "cart/products"],
+  "ground_truth": {
+   "root_cause": "Giỏ Biz của dinhvan365 có 278 sản phẩm; app gửi toàn bộ ProductIds trên query string của GET /product-service/v1/app/products/cart/products nên URL quá dài, bị trả 414 trước khi tới handler.",
+   "runtime_evidence": "Bugsnag Droppii Biz, app.release_stage development, error 6ae2f8c4c6c10d79faab779f '[STAGING]/[product-service] Request failed with status code 414', 81 events, last 2026-11-06 13:40 UTC, user.id 5364d782-2722-4e33-97b4-d6bbb8f12378.",
+   "data_evidence": "stg_order.cart (platform BIZ) + cart_item còn trong giỏ: 280 dòng, 278 product_id khác nhau.",
+   "code": "biz-mobile src/services/apis.ts:820-830 getProductDetails và src/services/configurations.ts:227-230 GET_CART_SKU (qs.stringify ProductIds vào URL); mono-backend MobileAppProductsController.cs:235-241 GetCartProductsAsync nhận [FromQuery] danh sách id.",
+   "bot_run": "D1109-008 (09/11/2026, bản trước PR #2): C, Code BE ✓ · DB ✓ · Log Bugsnag ✓, $0.77."
+  },
+  "max_tool_calls": 60,
+  "max_cost_usd": 1.5,
+  "valid_until": "2026-12-06 (Bugsnag lọc 30 ngày; sau đó dùng evals/fixtures)"
+ },
+ "_readme": "Case lỗi app Biz có bằng chứng runtime ở Bugsnag (dữ liệu staging thật, không có Jira/PR fix). Chưa đặt `layer` và `code_location`: URL do app dựng (2 chỗ gọi) nhưng API cũng nhận danh sách qua query, cần dev FE/BE chốt nên sửa ở đâu.",
+ "created": "2026-11-10"
+}

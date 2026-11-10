@@ -6,7 +6,7 @@ Hiện bot chỉ chạy staging (quyết định của Như, 06/11/2026). Tài l
 
 | Việc | Ở đâu | Khi sang PROD |
 |---|---|---|
-| Tên môi trường, nhãn `[STG]`, tiền tố app New Relic, tiền tố schema DB, nhánh code, câu "theo dữ liệu staging" | `config.json` → `env` | Đổi giá trị. `agent/RULES.md` lấy từ đây (`{ENV_NAME}`, `{NR_PREFIX}`, `{DB_PREFIX}`, `{CODE_BRANCH}`, `{DATA_NOTE}`) |
+| Tên môi trường, nhãn `[STG]`, tiền tố app New Relic, tiền tố schema DB, nhánh code, câu "theo dữ liệu staging" | `config.json` → `env` | Đổi giá trị. `agent/RULES.md` lấy từ đây (`{ENV_NAME}`, `{NR_PREFIX}`, `{DB_PREFIX}`, `{CODE_BRANCH}`, `{DATA_NOTE}`, `{BUGSNAG_STAGE}`, `{SENTRY_ENV}`). Prod: `bugsnag_release_stage` = `production`, `sentry_environment` = `production` |
 | Điều kiện kết luận theo loại | `config.json` → `gate` | Giữ hoặc siết |
 | Kết nối DB | `tools/dbhub-stg.py` (`DATABASES`, tên DB `vn_stg_*`) | **Viết bản riêng cho PROD**, xem mục 3. Không sửa file staging |
 | Repo/nhánh code | `config.json` → `knowledge` | Đọc đúng bản đang chạy, xem mục 3 |
