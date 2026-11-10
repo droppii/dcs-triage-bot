@@ -34,7 +34,7 @@ Bài học từ D1110-009 (giỏ hàng bấm + không thấy tổng tiền đổ
 - **`queryKey` có chứa tham số đổi không?** Nếu key có `JSON.stringify(params)` và params chứa giá trị người dùng vừa đổi (số lượng, địa chỉ…), thì "bị cache giá cũ" là SAI: react-query v5 với key mới trả `data = undefined` (UI hiện `-`/skeleton), không trả giá cũ. Loại giả thuyết cache bằng cách ghi vào `alternatives` với `refuted` và dòng chứng minh.
 - **Dòng nghi ngờ nên là điều kiện chặn hoặc chỗ làm rỗng dữ liệu:** `enabled` của query, `.filter(Boolean)`/`?.[0]` làm mảng rỗng khi hook cha đang refetch, `providerId` rỗng. Câu hỏi cần trả lời: khi hook cha lỗi hoặc trả rỗng với giá trị mới, query giá có còn chạy không?
 - **Tìm cap/clamp ở nơi thay đổi trạng thái** (ví dụ `quantity < maxQuantity ? 1 : 0`): thao tác có thể không đổi gì. Đưa thành câu hỏi cho người báo ("số lượng trên UI có tăng không?").
-- Phân biệt 3 nguyên nhân: (a) request không chạy (`enabled` false/hook cha lỗi), (b) request chạy nhưng BE trả giá không đổi, (c) UI không render lại. Chỉ New Relic/Network/Sentry mới phân biệt được; không có runtime thì verdict giữ `?` và **không nâng Priority**.
+- Phân biệt 3 nguyên nhân: (a) request không chạy (`enabled` false/hook cha lỗi), (b) request chạy nhưng BE trả giá không đổi, (c) UI không render lại. Chỉ New Relic/Network/Sentry mới phân biệt được; không có runtime thì verdict giữ `?`. Priority theo mục Priority của RULES (dính tiền → High); không tự thêm lý do nâng mức ngoài mục đó.
 
 ## 5. Bug client hay gặp, để lập giả thuyết (không phải kết luận)
 - Backend trả trường mới/đổi kiểu (null, thiếu) mà bản app cũ không xử lý.
