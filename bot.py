@@ -572,7 +572,7 @@ def sanitize(text):
 
 
 CHECKS = (('source_be', 'Code BE'), ('db', 'DB'), ('newrelic', 'New Relic'))
-MARK = {'confirmed': '✓', 'contradicts': '✗ ngược', 'not_found': '✗ không thấy', 'not_checked': '– chưa kiểm'}
+MARK = {'confirmed': '✓', 'contradicts': '✗ ngược lại', 'not_found': '✗ không thấy', 'not_checked': '– chưa kiểm tra'}
 
 
 def gated(out):
@@ -587,29 +587,40 @@ def verdict(out):
 
 
 def compose_reply(out, ticket, person, baqa):
+    """Same form as the Jira triage cards: UPPERCASE title, "- **Label:** `value` (confidence) — *reason*" bullets."""
     eff = verdict(out)
-    lines = [f"**{LABEL} DCS Triage Bot** · Loại: {TYPE_LABEL[eff]}"]
-    if out['type'] != 'E' and not out['missing_info']:  # show what was checked whenever an investigation ran
-        marks = [f"{name} {MARK[out['evidence'][k]['status']]}" for k, name in CHECKS]
-        if out['type'] == 'C':
-            marks += [f"{rca.CHECK_LABEL[n]} {'✓' if rca.check_ok(out, n) else '✗'}" for n in GATE.get('C', [])]
-        lines.append('Đã kiểm: ' + ' · '.join(marks))
-    lines += ['', out['reply_markdown'].strip()]
+    pct = lambda c: f" ({round(float(c) * 100)}%)" if isinstance(c, (int, float)) else ''
+    lines = [f"✨ **{LABEL} DCS Triage Bot — kết quả phân tích.**"]
+    if out['reply_markdown'].strip():
+        lines += ['', '**TÓM TẮT:**', out['reply_markdown'].strip()]
+    verdict_line = f"- **Loại:** `{TYPE_LABEL[eff]}`"
     if eff != out['type']:
         miss = [rca.CHECK_LABEL.get(n, n) for n in rca.gate_failures(out, GATE)]
-        why = ('thiếu: ' + ', '.join(miss)) if miss else 'verifier độc lập không xác nhận'
-        lines += ['', f"Bot chưa đủ bằng chứng (nghi: {TYPE_LABEL[out['type']]}; {why}) nên không kết luận. "
-                      "Người trực kiểm tra tiếp từ các bằng chứng trên."]
-    if out['type'] in ('C', '?') and rca.has_candidate(out):
-        lines += [''] + rca.render_rca(out, KNOWLEDGE_CFG, KNOWLEDGE_DIR, confirmed=(eff == 'C'))
+        why = ('thiếu: ' + ', '.join(miss)) if miss else 'kiểm tra độc lập không xác nhận'
+        verdict_line += (f" (nghi {TYPE_LABEL[out['type']]}{pct(out.get('confidence'))}) — *Chưa đủ bằng chứng nên chưa kết luận; "
+                         f"{why}. Người trực kiểm tra tiếp từ các bằng chứng bên dưới.*")
+    else:
+        verdict_line += pct(out.get('confidence'))
+    lines += ['', '**KẾT LUẬN:**', verdict_line]
     reported = text_of(ticket.get('Priority'))
     if reported and out['priority_suggested'] != reported:
-        lines += ['', f"Đề xuất Priority {reported} → {out['priority_suggested']}. Lý do: {out['priority_reason']}"]
+        lines.append(f"- **Priority:** `{reported} → {out['priority_suggested']}` — *{out['priority_reason']}*")
     route = {'C': person, 'D': person, '?': person, 'E': baqa}.get(eff)
     # plan: a High ticket goes to on-call right away, even while the bot is still waiting for the reporter
     if route is not None and (not out['missing_info'] or out['priority_suggested'] == 'High'):
         who = route or '(không tìm thấy lịch trực cho Product này)'
-        lines += ['', f"Chuyển: {who} (sandbox: chỉ ghi tên, không tag)"]
+        lines.append(f"- **Giao cho:** {who} *(sandbox: chỉ ghi tên, không tag)*")
+    if out['type'] != 'E' and not out['missing_info']:  # show what was checked whenever an investigation ran
+        lines += ['', '**ĐÃ KIỂM TRA:**']
+        for k, name in CHECKS:
+            ev = out['evidence'][k]
+            detail = sanitize(str(ev.get('detail') or '')).replace('*', '')[:200]
+            lines.append(f"- **{name}:** `{MARK[ev['status']]}`" + (f" — *{detail}*" if detail else ''))
+        if out['type'] == 'C':
+            lines += [f"- **{rca.CHECK_LABEL[n][:1].upper() + rca.CHECK_LABEL[n][1:]}:** `{'✓' if rca.check_ok(out, n) else '✗'}`"
+                      for n in GATE.get('C', [])]
+    if out['type'] in ('C', '?') and rca.has_candidate(out):
+        lines += [''] + rca.render_rca(out, KNOWLEDGE_CFG, KNOWLEDGE_DIR, confirmed=(eff == 'C'))
     return '\n'.join(lines)
 
 

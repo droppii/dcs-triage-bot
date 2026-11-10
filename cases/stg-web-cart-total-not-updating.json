@@ -1,0 +1,28 @@
+{
+ "ticket": {
+  "Title": "Giỏ hàng: bấm tăng số lượng sản phẩm không thấy tổng tiền cập nhật",
+  "Description": "Trên Mall Web (Chrome 130, macOS, staging), vào Giỏ hàng, bấm nút + tăng số lượng một sản phẩm thì không thấy tổng tiền cập nhật. Mới thử 1 sản phẩm.",
+  "Priority": "Medium",
+  "Product": "Mall Web",
+  "Feature": "Giỏ hàng",
+  "ReportedBy": "QA test"
+ },
+ "expect": {
+  "verdict_any_of": ["?"],
+  "forbidden_conclusions": [
+   "giá bị cache",
+   "cache giá cũ"
+  ],
+  "max_tool_calls": 60,
+  "max_cost_usd": 1.5,
+  "ground_truth": {
+   "status": "CHƯA có nguyên nhân gốc được xác nhận. Đây là case chống hồi quy, không phải đáp án.",
+   "verified_in_code": "web-mall@44c27bb: zustand/cart.ts:118-145 cộng quantity đúng; tổng hiển thị là response /order-service/v1/public/checkouts/pricing (hooks/order/useFetchCheckoutPrice.ts:23-26). queryKey của hook giá và của useFetchShippingFee đều chứa JSON.stringify(params) gồm items[].quantity, nên đổi số lượng thì key đổi và query chạy lại; react-query v5 với key mới trả data undefined (UI hiện '-' hoặc skeleton), không trả giá cũ.",
+   "open_suspects": "components/home/cart/CartForm.tsx:85-88 và hooks/order/useFetchCheckoutPrice.ts:19-20 (enabled phụ thuộc shippingFeeQuery.data, providerId); hooks/order/useFetchShippingFee.ts:31 (.filter(Boolean) làm mảng rỗng khi refetch); components/home/cart/CartItemComponent.tsx:111 (quantity < maxQuantity ? 1 : 0). Chưa có runtime để loại hay xác nhận.",
+   "bot_run": "D1110-009 (10/11/2026, staging): verdict ?, nêu queryKey làm dòng nghi và 'giá bị cache' (sai theo code), đề xuất Medium → High theo mục Priority của RULES (dính tiền)."
+  },
+  "valid_until": "Khi có nguyên nhân thật: đổi thành case có đáp án (verdict C, code_location, layer) theo _TEMPLATE-fe-mobile-bug.json"
+ },
+ "_readme": "Case chống hồi quy cho bug FE web-mall chưa có đáp án. Chỉ chấm: bot không được kết luận C khi chưa có runtime, và không được lặp lại giả thuyết 'giá bị cache' mà code đã bác bỏ. Không chấm code_location, vì chưa biết dòng đúng. Nguồn: kiểm lại báo cáo D1110-009 trên bản web-mall 44c27bb.",
+ "created": "2026-11-10"
+}
