@@ -127,6 +127,10 @@ text = '\n'.join(rca.render_rca(o, know, K, confirmed=True))
 assert 'https://github.com/droppii/mono-backend/blob/' + 'a' * 40 + '/java/order/CartServiceImpl.java#L40' in text, text
 assert 'Nguyên nhân gốc' in text and 'Cơ chế' in text and 'getUuid' in text and 'mono-backend@aaaaaaaa' in text
 assert 'Ứng viên' in '\n'.join(rca.render_rca(o, know, K, confirmed=False))
+# versions list every clone; only the repos the RCA cites may appear as "đã dẫn"
+o['_versions']['web-mall'] = {'sha': 'b' * 40, 'branch': 'main', 'date': '2026-11-09'}
+text = '\n'.join(rca.render_rca(o, know, K, confirmed=True))
+assert 'mono-backend@aaaaaaaa' in text and 'web-mall@' not in text and 'Bản code đã dẫn' in text, text
 
 # --- bot.compose_reply: unconfirmed C still hands the candidate to on-call (this was hidden before) ---
 o = make()

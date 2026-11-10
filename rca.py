@@ -390,10 +390,14 @@ def render_rca(out, knowledge, kdir, confirmed):
         L.append('- Phạm vi ảnh hưởng: ' + '; '.join(rca['blast_radius']))
     if norm(rca.get('introduced_by')):
         L.append(f"- Đưa vào bởi: {norm(rca['introduced_by'])}")
+    # `versions` lists every clone, not what was read: show only repos the RCA actually cites (code_location / chain artifacts),
+    # otherwise a ticket that read one repo is reported as having read all twelve.
+    cited_txt = ' '.join([str(loc.get('file') or '')] + [str(c.get('artifact') or '') for c in chain])
     versions_txt = ', '.join(f"{r}@{v['sha'][:8]} ({v.get('branch', '?')}, {v.get('date', '?')})"
-                             for r, v in versions.items() if v.get('sha') and r != 'engineering-knowledge')
+                             for r, v in versions.items()
+                             if v.get('sha') and r != 'engineering-knowledge' and re.search(rf'(^|[\s/\\]){re.escape(r)}[/\\]', cited_txt))
     if versions_txt or norm(rca.get('code_version')):
-        L.append(f"- Bản code đã đọc: {versions_txt}" + (f". Đối chiếu bản đang chạy: {norm(rca['code_version'])}" if norm(rca.get('code_version')) else ''))
+        L.append(f"- Bản code đã dẫn: {versions_txt}" + (f". Đối chiếu bản đang chạy: {norm(rca['code_version'])}" if norm(rca.get('code_version')) else ''))
     for key, label in (('repro_steps', 'Cách tái hiện'), ('suggested_fix', 'Gợi ý sửa'),
                        ('failing_test_idea', 'Test đề xuất'), ('jira_title', 'Tiêu đề Jira gợi ý')):
         if norm(rca.get(key)):

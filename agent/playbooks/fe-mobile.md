@@ -28,6 +28,14 @@ Nguồn: bảng Product → repo ở RULES (Bước 1a) và handbook `engineerin
 3. Backend: tiếp tục theo quy trình chung (New Relic, DB, handler). Đưa mọi mắt xích vào `causal_chain` với `đường dẫn:dòng`: màn hình → hàm gọi API → route → handler → bảng.
 4. Điều kiện hiển thị (cờ, remote config, trường API) thường là nguyên nhân của "thiếu nút/tùy chọn": Read đoạn render, ghi giá trị cờ/trường quyết định (xem thêm `eligibility-gates.md`).
 
+## 4b. Chọn dòng nghi ngờ cho lỗi "dữ liệu hiển thị không cập nhật" (react-query / zustand)
+Bài học từ D1110-009 (giỏ hàng bấm + không thấy tổng tiền đổi): bot từng chỉ vào `queryKey` của hook giá, mà dòng đó đúng.
+- **Đọc đủ chuỗi hook phụ thuộc trước khi gán `code_location`.** Từ giá trị hiển thị, lần ngược: component hiển thị → hook trả giá trị → mọi hook mà `enabled` của nó phụ thuộc vào (ví dụ giá checkout phụ thuộc phí ship, voucher, quà). Đọc cả các hook đó, không dừng ở hook cuối.
+- **`queryKey` có chứa tham số đổi không?** Nếu key có `JSON.stringify(params)` và params chứa giá trị người dùng vừa đổi (số lượng, địa chỉ…), thì "bị cache giá cũ" là SAI: react-query v5 với key mới trả `data = undefined` (UI hiện `-`/skeleton), không trả giá cũ. Loại giả thuyết cache bằng cách ghi vào `alternatives` với `refuted` và dòng chứng minh.
+- **Dòng nghi ngờ nên là điều kiện chặn hoặc chỗ làm rỗng dữ liệu:** `enabled` của query, `.filter(Boolean)`/`?.[0]` làm mảng rỗng khi hook cha đang refetch, `providerId` rỗng. Câu hỏi cần trả lời: khi hook cha lỗi hoặc trả rỗng với giá trị mới, query giá có còn chạy không?
+- **Tìm cap/clamp ở nơi thay đổi trạng thái** (ví dụ `quantity < maxQuantity ? 1 : 0`): thao tác có thể không đổi gì. Đưa thành câu hỏi cho người báo ("số lượng trên UI có tăng không?").
+- Phân biệt 3 nguyên nhân: (a) request không chạy (`enabled` false/hook cha lỗi), (b) request chạy nhưng BE trả giá không đổi, (c) UI không render lại. Chỉ New Relic/Network/Sentry mới phân biệt được; không có runtime thì verdict giữ `?` và **không nâng Priority**.
+
 ## 5. Bug client hay gặp, để lập giả thuyết (không phải kết luận)
 - Backend trả trường mới/đổi kiểu (null, thiếu) mà bản app cũ không xử lý.
 - Mã lỗi backend chưa được ánh xạ sang thông báo trên UI nên hiện thông báo chung.
