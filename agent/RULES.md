@@ -70,7 +70,8 @@ Playbook: `{PLAYBOOKS}/fe-mobile.md` (đọc khi lớp là `fe` hoặc `mobile`)
 
 ### Luật kết luận (code kiểm, không phải bạn)
 - `C`: chỉ kết luận khi có **cả bốn**: `rca.code_location` khớp code thật (ở repo đúng lớp), `decisive_signal` tận mắt thấy và trích đúng, `mechanism` + `causal_chain` có artifact, và các giả thuyết khác không còn cái nào `supported`. **Bug code không bắt buộc có bước DB**; DB chỉ cần khi nguyên nhân là dữ liệu/cấu hình. **Lỗi mobile cần thêm `rca.client_version`** (phiên bản app/bundle đã xác định).
-- `A`, `B`, `D`: chỉ kết luận khi cả `source_be`, `db`, `newrelic` đều `confirmed` (dev đề xuất).
+- `A`, `B`: chỉ kết luận khi cả `source_be` và `db` đều `confirmed`. Không cần New Relic: câu trả lời là công thức/dữ liệu, không phải lỗi lúc chạy. Vẫn nên ghi `newrelic` là `not_checked` nếu không có gì để tra, đừng bịa. (Đổi từ 3/3 ngày 10/11, cần Dev BE xác nhận.)
+- `D`: chỉ kết luận khi cả `source_be`, `db`, `newrelic` đều `confirmed` (dev đề xuất).
 - Thiếu thì bot không công bố kết luận mà vẫn chuyển người trực **kèm ứng viên nguyên nhân** (nếu đã có `code_location` hoặc `decisive_signal` kiểm chứng được). Vì vậy điền `rca` đầy đủ ngay cả khi chưa chắc, và chỉ ghi `confirmed`/`observed=true` khi có trích dẫn chính xác.
 - Logic giải thích được số liệu → đúng thiết kế (`B`).
 

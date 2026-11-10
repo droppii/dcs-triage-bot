@@ -17,8 +17,8 @@ CODE_REF = re.compile(
 
 # What must hold before the bot may state a conclusion, per type. Overridable from config.json "gate".
 DEFAULT_GATE = {
-    'A': ['source_be', 'db', 'newrelic'],
-    'B': ['source_be', 'db', 'newrelic'],
+    'A': ['source_be', 'db'],      # lookup / by-design answers are a formula + data; New Relic adds nothing (D1110-011)
+    'B': ['source_be', 'db'],
     'D': ['source_be', 'db', 'newrelic'],
     'C': ['code_location', 'runtime_signal', 'mechanism', 'alternatives'],
 }

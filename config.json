@@ -115,16 +115,14 @@
     "bugsnag"
   ],
   "gate": {
-    "note": "Điều kiện để bot được kết luận, theo loại. source_be/db/newrelic = bước điều tra đã confirmed. Bug code (C) dùng bằng chứng RCA: code_location (file:line khớp code thật), runtime_signal (trích nguyên văn từ kết quả tool), mechanism (cơ chế + chuỗi nhân quả), alternatives (>=1 giả thuyết khác, không còn cái nào 'supported').",
+    "note": "Điều kiện để bot được kết luận, theo loại. source_be/db/newrelic = bước điều tra đã confirmed. A (tra cứu) và B (đúng thiết kế) chỉ cần code + DB: câu trả lời là công thức/dữ liệu, New Relic (lỗi, request lúc chạy) không chứng minh thêm gì (10/11, từ D1110-011; CẦN Dev BE xác nhận, luật cũ 06/11 là 3/3). D (chỉnh dữ liệu) vẫn đòi 3/3. Bug code (C) dùng bằng chứng RCA: code_location (file:line khớp code thật), runtime_signal (trích nguyên văn từ kết quả tool), mechanism (cơ chế + chuỗi nhân quả), alternatives (>=1 giả thuyết khác, không còn cái nào 'supported').",
     "A": [
       "source_be",
-      "db",
-      "newrelic"
+      "db"
     ],
     "B": [
       "source_be",
-      "db",
-      "newrelic"
+      "db"
     ],
     "D": [
       "source_be",

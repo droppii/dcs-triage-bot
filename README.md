@@ -33,7 +33,8 @@ bot.py kiểm lại, không tin model tự khai:
 Cổng kết luận theo loại (config.json "gate"):
    • C bug code  → dòng code lỗi + dấu hiệu runtime + cơ chế + đã loại giả thuyết khác
                    (+ verifier độc lập đọc lại bản ghi và cố bác bỏ). Không bắt buộc bước DB.
-   • A / B / D   → đủ 3/3: code, DB, New Relic cùng khớp
+   • A / B       → code + DB cùng khớp (không cần New Relic)
+   • D           → đủ 3/3: code, DB, New Relic cùng khớp
    • thiếu       → "Chưa kết luận", chuyển người trực KÈM ứng viên nguyên nhân (nếu đã có) + việc cần làm tiếp
    • không có mã tham chiếu → chỉ hỏi phần bắt buộc; ticket High vẫn chuyển người trực ngay
         │
@@ -197,7 +198,7 @@ Lỗi mobile bắt buộc có `rca.client_version` (phiên bản app/bundle lấ
 
 ## Bằng chứng RCA và cách đo
 
-- **Cổng theo loại ticket** nằm ở `config.json` → `gate`. Đây là thay đổi so với quyết định "cả 3 bước khớp" của Dev BE (06/11): với **bug code (C)** cổng không còn đòi bước DB (NPE trong New Relic + dòng code gây lỗi đã đủ nếu có cơ chế và đã loại giả thuyết khác). A/B/D vẫn đòi 3/3. Muốn quay lại luật cũ cho C: đặt `"C": ["source_be", "db", "newrelic"]`. **Cần Dev BE xác nhận thay đổi này.**
+- **Cổng theo loại ticket** nằm ở `config.json` → `gate`. Đây là thay đổi so với quyết định "cả 3 bước khớp" của Dev BE (06/11): với **bug code (C)** cổng không còn đòi bước DB (NPE trong New Relic + dòng code gây lỗi đã đủ nếu có cơ chế và đã loại giả thuyết khác). **A và B cũng chỉ còn đòi code + DB** (10/11, từ ticket D1110-011: giải thích phí thanh toán bằng công thức trong `PaymentMethod.java` và dữ liệu đơn, New Relic không có gì để chứng minh thêm mà vẫn bị ghi `?`); D vẫn đòi 3/3. Muốn quay lại luật cũ cho A/B: thêm `"newrelic"` vào hai danh sách đó. Muốn quay lại luật cũ cho C: đặt `"C": ["source_be", "db", "newrelic"]`. **Cần Dev BE xác nhận thay đổi này.**
 - **Đo:** `tools/eval.py` chấm từng lần chạy (verdict, chuỗi bắt buộc, `file:dòng` đúng, không bịa trích dẫn, ngân sách tool/chi phí), chạy N lần vì cùng một case có thể ra kết luận khác nhau. Điểm 1.0 / 0.5 / 0.05; fail nếu một case tụt quá 0.2 hoặc điểm trung bình tụt so với `evals/baseline.json`.
 - **Chưa có case bug có đáp án** (BE, FE lẫn mobile; mẫu: `cases/_TEMPLATE-bug-from-pr.json`, `cases/_TEMPLATE-fe-mobile-bug.json` có thêm `layer` và phiên bản app). 4 case hiện tại đều ra `?` hoặc "đúng thiết kế". Dựng case từ bug Jira đã đóng có PR fix theo `cases/_TEMPLATE-bug-from-pr.json` (đáp án `file:dòng` lấy từ diff của PR); đây là việc quan trọng nhất để biết bot có tìm đúng dòng code lỗi hay không.
 - **Fixture:** log New Relic hết hạn sau ~30 ngày. `tools/eval.py --freeze case=log` lưu lần chạy tốt vào `evals/fixtures/`, `--from-fixtures` chấm lại miễn phí. Lưu ý: nó chấm lại câu trả lời đã ghi, không chạy lại agent trên kết quả tool đã ghi.
