@@ -50,6 +50,9 @@ def score_case(expect, out, effective):
         if ok and rng:
             ok = not (int(loc['line_end']) < rng[0] or int(loc['line_start']) > rng[1])
         add('code_location', ok, f"{cl['file_suffix']} {rng or ''} vs {loc.get('file')}:{loc.get('line_start')}-{loc.get('line_end')}")
+    if expect.get('layer'):  # be | odoo | fe | mobile: the layer the bug really lives in (taken from the repo of the cited line)
+        got = (out.get('rca') or {}).get('layer')
+        add('layer', got == expect['layer'], f"{got} vs {expect['layer']}")
     add('no_fabrication', not out.get('_problems'), '; '.join(out.get('_problems') or [])[:200])
     if 'max_tool_calls' in expect:
         add('tool_budget', out.get('_tool_calls', 0) <= expect['max_tool_calls'], str(out.get('_tool_calls')))

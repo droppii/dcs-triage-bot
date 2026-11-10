@@ -19,6 +19,99 @@
     "code_branch": "dev",
     "data_note": "theo dữ liệu staging"
   },
+  "products": {
+    "note": "Ghép Product (cột Product của ticket) với lớp lỗi, repo cần đọc và công cụ lỗi phía client. Suy ra từ handbook engineering-knowledge (platform.md, platform-fe.md); CHƯA được Dev FE/Mobile xác nhận (confirmed=false). API mà FE/mobile gọi nằm ở mono-backend.",
+    "map": {
+      "Biz App": {
+        "layer": "mobile",
+        "repos": [
+          "biz-mobile"
+        ],
+        "tracker": "Bugsnag project 'Droppii Biz'",
+        "confirmed": false,
+        "mcp": [
+          "bugsnag"
+        ]
+      },
+      "Mall App": {
+        "layer": "mobile",
+        "repos": [
+          "customer-mobile"
+        ],
+        "tracker": "Bugsnag project 'Droppii Mall'",
+        "confirmed": false,
+        "mcp": [
+          "bugsnag"
+        ]
+      },
+      "Mall Web": {
+        "layer": "fe",
+        "repos": [
+          "web-mall"
+        ],
+        "tracker": "Sentry project 'web-mall' (org droppii-kp)",
+        "confirmed": false,
+        "mcp": [
+          "sentry"
+        ]
+      },
+      "Biz Web": {
+        "layer": "fe",
+        "repos": [
+          "b2b-client"
+        ],
+        "tracker": "chưa rõ",
+        "confirmed": false,
+        "mcp": []
+      },
+      "PDP Portal": {
+        "layer": "fe",
+        "repos": [
+          "dashboards"
+        ],
+        "tracker": "chưa rõ",
+        "confirmed": false,
+        "mcp": []
+      },
+      "OBEFE": {
+        "layer": "fe",
+        "repos": [
+          "dashboards"
+        ],
+        "tracker": "chưa rõ",
+        "confirmed": false,
+        "mcp": []
+      },
+      "ERP": {
+        "layer": "fe",
+        "repos": [
+          "erp-dashboard"
+        ],
+        "tracker": "chưa rõ",
+        "confirmed": false,
+        "mcp": []
+      },
+      "Odoo": {
+        "layer": "odoo",
+        "repos": [
+          "droppii-odoo"
+        ],
+        "tracker": "New Relic vn-stg-odoo-service",
+        "confirmed": true,
+        "mcp": []
+      }
+    }
+  },
+  "mcp_note": "MCP bật theo Product (mỗi server thừa tốn token ở MỌI lượt: Sentry ~86k, Bugsnag ~26k, New Relic ~32k; đã đo 10/11). mcp_default luôn bật; products.map.<Product>.mcp thêm tracker của Product; Product lạ dùng mcp_unknown_product. Tool không nằm trong READ_TOOLS bị cắt bằng --disallowedTools.",
+  "mcp_default": [
+    "newrelic",
+    "dbhub",
+    "repogit"
+  ],
+  "mcp_unknown_product": [
+    "sentry",
+    "bugsnag"
+  ],
   "gate": {
     "note": "Điều kiện để bot được kết luận, theo loại. source_be/db/newrelic = bước điều tra đã confirmed. Bug code (C) dùng bằng chứng RCA: code_location (file:line khớp code thật), runtime_signal (trích nguyên văn từ kết quả tool), mechanism (cơ chế + chuỗi nhân quả), alternatives (>=1 giả thuyết khác, không còn cái nào 'supported').",
     "A": [
@@ -44,7 +137,8 @@
     ]
   },
   "verifier": {
-    "enabled": true,
+    "note": "TẮT mặc định vì chi phí: mỗi lần chạy thêm $0,17-0,25 (tới 600k token) và chưa đáng tin trên DMW-2203 (bắt đúng 1, FAIL nhầm 1 lần đúng, PASS nhầm 1 lần sai). Cổng kiểm chứng bằng code (rca.py) đã chặn kết luận thiếu bằng chứng runtime. Bật lại khi tools/eval.py chứng minh có lợi.",
+    "enabled": false,
     "model": "sonnet"
   },
   "model": "sonnet",
@@ -83,18 +177,21 @@
     "limit": 300,
     "top_k": 3
   },
+  "knowledge_note": "layer: be | odoo | fe | mobile | docs. Backend gồm NHIỀU repo: mono-backend (C#/Java/Kotlin/TypeScript, 16 service), droppii-odoo, openim-server (Go), assistant-service và recommender-service (Python). Nhánh mặc định khác nhau theo repo (dev hoặc main): khai đúng ở đây. Nhánh của FE/mobile là nhánh mặc định, CHƯA xác nhận là bản đang chạy trên staging: Dev FE/Mobile cần chỉnh; bot luôn đối chiếu với phiên bản app/bundle lấy từ Bugsnag/Sentry (rca.client_version). Repo `gamification` là app web Next.js, không phải service. Chưa thêm code-push-server (CodePush, hạ tầng OTA) và các repo FE khác trong handbook (chat, chatbot-ai, ddc…): thêm khi cần.",
   "knowledge": [
     {
       "name": "engineering-knowledge",
       "url": "https://github.com/droppii/engineering-knowledge.git",
       "branch": "main",
-      "history_days": 30
+      "history_days": 30,
+      "layer": "docs"
     },
     {
       "name": "mono-backend",
       "url": "https://github.com/droppii/mono-backend.git",
       "branch": "dev",
-      "history_days": 180
+      "history_days": 180,
+      "layer": "be"
     },
     {
       "name": "droppii-odoo",
@@ -103,7 +200,78 @@
       "sparse": [
         "develop"
       ],
-      "history_days": 180
+      "history_days": 180,
+      "layer": "odoo"
+    },
+    {
+      "name": "biz-mobile",
+      "url": "https://github.com/droppii/biz-mobile.git",
+      "branch": "main",
+      "layer": "mobile",
+      "history_days": 90
+    },
+    {
+      "name": "customer-mobile",
+      "url": "https://github.com/droppii/customer-mobile.git",
+      "branch": "main",
+      "layer": "mobile",
+      "history_days": 90
+    },
+    {
+      "name": "web-mall",
+      "url": "https://github.com/droppii/web-mall.git",
+      "branch": "main",
+      "layer": "fe",
+      "history_days": 90
+    },
+    {
+      "name": "b2b-client",
+      "url": "https://github.com/droppii/b2b-client.git",
+      "branch": "main",
+      "layer": "fe",
+      "history_days": 90
+    },
+    {
+      "name": "dashboards",
+      "url": "https://github.com/droppii/dashboards.git",
+      "branch": "main",
+      "layer": "fe",
+      "history_days": 90
+    },
+    {
+      "name": "erp-dashboard",
+      "url": "https://github.com/droppii/erp-dashboard.git",
+      "branch": "main",
+      "layer": "fe",
+      "history_days": 90
+    },
+    {
+      "name": "openim-server",
+      "url": "https://github.com/droppii/openim-server.git",
+      "branch": "dev",
+      "layer": "be",
+      "history_days": 90
+    },
+    {
+      "name": "assistant-service",
+      "url": "https://github.com/droppii/assistant-service.git",
+      "branch": "dev",
+      "layer": "be",
+      "history_days": 90
+    },
+    {
+      "name": "recommender-service",
+      "url": "https://github.com/droppii/recommender-service.git",
+      "branch": "main",
+      "layer": "be",
+      "history_days": 90
+    },
+    {
+      "name": "gamification",
+      "url": "https://github.com/droppii/gamification.git",
+      "branch": "main",
+      "layer": "fe",
+      "history_days": 90
     }
   ]
 }

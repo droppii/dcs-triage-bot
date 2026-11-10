@@ -40,6 +40,7 @@ File `cases/<tên>.json`:
 - `verdict_any_of`: loại bot được phép công bố (loại sau cổng, `?` nếu chưa đủ bằng chứng). Case chỉ hỏi thông tin: `"missing_info": true`.
 - `must_contain` / `must_not_contain` / `forbidden_conclusions`: **chuỗi nguyên văn** để máy khớp. Các khóa mô tả như `must_mention`, `must_not`, `why` chỉ là ghi chú cho người đọc.
 - `code_location`: đáp án `file:dòng` (lấy từ diff của PR fix nếu là bug đã sửa). Bot phải trích đúng file và dòng chồng lên khoảng này, và trích dẫn phải khớp code thật.
+- **Lỗi FE/mobile**: copy `cases/_TEMPLATE-fe-mobile-bug.json` (có `layer` và `app_version`); với mobile ghi tag của phiên bản app, vì dòng lỗi có thể không còn ở HEAD.
 - **Case bug có đáp án** (quan trọng nhất): copy `cases/_TEMPLATE-bug-from-pr.json`, dựng lại dữ liệu staging cho bug Jira đã đóng, ghi PR fix vào `ground_truth`. Mỗi bộ case nên có ít nhất một case *sentinel* (giả thuyết hiển nhiên là sai).
 - Chấm: `python3 tools/eval.py cases/<tên>.json --runs 3`.
 

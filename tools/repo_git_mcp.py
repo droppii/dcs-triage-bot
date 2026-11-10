@@ -13,17 +13,26 @@ MAX_OUT = 14000
 SAFE_PATH = re.compile(r'^[\w@+./ \-]{1,300}$')
 SAFE_DATE = re.compile(r'^[\w:+\-. ]{1,40}$')
 SHA = re.compile(r'^[0-9a-fA-F]{4,40}$')
+REF = re.compile(r'^[\w./@+\-]{1,100}$')            # tag / branch / sha, never an option or a range
+TAG_PATTERN = re.compile(r'^[\w.*?\-/]{1,60}$')
 ROOT = Path('.')
 
 TOOLS = [
     {'name': 'git_head', 'description': 'HEAD commit (sha, date, subject) and branch of a knowledge repo, plus how far its history goes back.',
      'inputSchema': {'type': 'object', 'properties': {'repo': {'type': 'string'}}, 'required': ['repo']}},
-    {'name': 'git_log', 'description': 'Commits touching a path (or the whole repo). since/until accept dates like 2026-11-01 or "2 weeks ago". Max 30.',
-     'inputSchema': {'type': 'object', 'properties': {'repo': {'type': 'string'}, 'path': {'type': 'string'},
+    {'name': 'git_log', 'description': 'Commits touching a path (or the whole repo), optionally as of a tag/branch/sha (ref). since/until accept dates like 2026-11-01 or "2 weeks ago". Max 30.',
+     'inputSchema': {'type': 'object', 'properties': {'repo': {'type': 'string'}, 'path': {'type': 'string'}, 'ref': {'type': 'string'},
                                                        'since': {'type': 'string'}, 'until': {'type': 'string'},
                                                        'limit': {'type': 'integer'}}, 'required': ['repo']}},
-    {'name': 'git_blame', 'description': 'Who/which commit last changed lines line_start..line_end (max 200 lines) of a file. A commit marked ^ is a boundary of the cloned history: the real origin is older.',
-     'inputSchema': {'type': 'object', 'properties': {'repo': {'type': 'string'}, 'path': {'type': 'string'},
+    {'name': 'git_tags', 'description': 'Tags of a repo, newest first, with commit sha and date. Use it to map an app version (e.g. v3.12.0) to the commit that was released. pattern is a glob like "v3.12*". Max 50.',
+     'inputSchema': {'type': 'object', 'properties': {'repo': {'type': 'string'}, 'pattern': {'type': 'string'}, 'limit': {'type': 'integer'}},
+                     'required': ['repo']}},
+    {'name': 'git_file', 'description': 'Lines line_start..line_end (max 200) of a file AS OF a tag/sha/branch. Use it to read the code of the version the user actually runs.',
+     'inputSchema': {'type': 'object', 'properties': {'repo': {'type': 'string'}, 'ref': {'type': 'string'}, 'path': {'type': 'string'},
+                                                       'line_start': {'type': 'integer'}, 'line_end': {'type': 'integer'}},
+                     'required': ['repo', 'ref', 'path', 'line_start', 'line_end']}},
+    {'name': 'git_blame', 'description': 'Who/which commit last changed lines line_start..line_end (max 200 lines) of a file, optionally as of a tag/sha (ref). A commit marked ^ is a boundary of the cloned history: the real origin is older.',
+     'inputSchema': {'type': 'object', 'properties': {'repo': {'type': 'string'}, 'path': {'type': 'string'}, 'ref': {'type': 'string'},
                                                        'line_start': {'type': 'integer'}, 'line_end': {'type': 'integer'}},
                      'required': ['repo', 'path', 'line_start', 'line_end']}},
     {'name': 'git_show', 'description': 'Files changed and diff of one commit, optionally limited to a path. Output is truncated.',
@@ -44,6 +53,13 @@ def safe_path(p):
     if p and (not SAFE_PATH.match(p) or p.startswith(('/', '-')) or '..' in p.split('/')):
         raise ValueError('invalid path (relative path inside the repo, no "..")')
     return p
+
+
+def safe_ref(r):
+    r = str(r or '')
+    if r and (not REF.match(r) or r.startswith('-') or '..' in r):
+        raise ValueError('invalid ref (a tag, branch or sha; no ranges, no options)')
+    return r
 
 
 def git(d, *args):
@@ -77,13 +93,33 @@ def call(name, a):
                     raise ValueError(f'invalid {key}')
                 args.append(f'--{key}={a[key]}')
         path = safe_path(a.get('path'))
-        return clip(git(d, *args, *(['--', path] if path else [])) or '(no commits in range; clone history may be shorter than the range)')
+        ref = safe_ref(a.get('ref'))
+        return clip(git(d, *args, *([ref] if ref else []), *(['--', path] if path else []))
+                    or '(no commits in range; clone history may be shorter than the range)')
+    if name == 'git_tags':
+        pat = str(a.get('pattern') or '*')
+        if not TAG_PATTERN.match(pat) or pat.startswith('-'):
+            raise ValueError('invalid tag pattern')
+        n = max(1, min(int(a.get('limit') or 20), 50))
+        out = git(d, 'tag', '--list', pat, '--sort=-creatordate', '--format=%(refname:short) | %(objectname:short) | %(creatordate:short)')
+        rows = out.splitlines()[:n]
+        return '\n'.join(rows) or '(no tags match; tags may not be in this clone: the clone only has recent history)'
+    if name == 'git_file':
+        path, ref = safe_path(a.get('path')), safe_ref(a.get('ref'))
+        s, e = int(a['line_start']), int(a['line_end'])
+        if not path or not ref or not (1 <= s <= e <= s + 199):
+            raise ValueError('need ref, path and 1 <= line_start <= line_end <= line_start+199')
+        text = git(d, 'show', f'{ref}:{path}').splitlines()
+        if s > len(text):
+            raise ValueError(f'file has only {len(text)} lines at {ref}')
+        return clip('\n'.join(f'{i}: {l}' for i, l in enumerate(text[s - 1:e], s)))
     if name == 'git_blame':
         path = safe_path(a.get('path'))
         s, e = int(a['line_start']), int(a['line_end'])
         if not (1 <= s <= e <= s + 199):
             raise ValueError('line range must satisfy 1 <= line_start <= line_end <= line_start+199')
-        return clip(git(d, 'blame', '-w', '--date=short', '-L', f'{s},{e}', '--', path))
+        ref = safe_ref(a.get('ref'))
+        return clip(git(d, 'blame', '-w', '--date=short', '-L', f'{s},{e}', *([ref] if ref else []), '--', path))
     if name == 'git_show':
         sha = str(a.get('sha', ''))
         if not SHA.match(sha):

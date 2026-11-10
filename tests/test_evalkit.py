@@ -37,6 +37,11 @@ mi = {'missing_info': True}
 assert evalkit.score_case(mi, {'missing_info': ['mã đơn'], 'reply_markdown': '', 'summary': ''}, '?')['score'] == 1.0
 assert evalkit.score_case(mi, {'missing_info': [], 'reply_markdown': '', 'summary': ''}, 'C')['score'] == 0.05
 
+# layer expectation (FE/mobile vs backend): a wrong layer costs half the score, not the whole case
+lay = {**ok_out, 'rca': {**ok_out['rca'], 'layer': 'mobile'}}
+assert evalkit.score_case({**expect, 'layer': 'mobile'}, lay, 'C')['score'] == 1.0
+assert evalkit.score_case({**expect, 'layer': 'be'}, lay, 'C')['score'] == 0.5
+
 # baseline comparison
 assert evalkit.compare_baseline({'a': 1.0, 'b': 0.5}, {'a': 1.0, 'b': 0.5}) == []
 assert evalkit.compare_baseline({'a': 0.5}, {'a': 1.0}) == ['a: 1.00 → 0.50', 'mean: 1.00 → 0.50']

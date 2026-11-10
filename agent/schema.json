@@ -60,7 +60,7 @@
               "type": "string"
             }
           },
-          "description": "detail: mọi đường dẫn:dòng đã đọc + logic tìm được. Mỗi đường dẫn:dòng sẽ được code đối chiếu với file thật."
+          "description": "detail: mọi đường dẫn:dòng đã đọc (ở repo đúng lớp: BE, Odoo, FE hoặc mobile) + logic tìm được. Mỗi đường dẫn:dòng sẽ được code đối chiếu với file thật. (Tên khóa giữ nguyên là source_be.)"
         },
         "db": {
           "type": "object",
@@ -129,7 +129,9 @@
         "failing_test_idea",
         "repro_steps",
         "jira_title",
-        "could_not_confirm"
+        "could_not_confirm",
+        "layer",
+        "client_version"
       ],
       "properties": {
         "category": {
@@ -195,7 +197,8 @@
             "line_start",
             "line_end",
             "symbol",
-            "snippet"
+            "snippet",
+            "ref"
           ],
           "properties": {
             "file": {
@@ -213,7 +216,11 @@
             },
             "snippet": {
               "type": "string",
-              "description": "1-6 dòng chép nguyên văn từ file, đúng chỗ gây lỗi"
+              "description": "1-3 dòng NGẮN chép nguyên văn từ file, đúng chỗ gây lỗi. JSON an toàn: bỏ dấu ngoặc kép, dấu nháy và dấu gạch chéo ngược khỏi đoạn trích (bot so khớp bỏ qua các ký tự này); không xuống dòng thật. Có thể nối các đoạn bằng ..."
+            },
+            "ref": {
+              "type": "string",
+              "description": "tag/sha/nhánh của bản code đã đọc nếu KHÁC HEAD của bản clone (vd tag của app version người dùng đang chạy); rỗng = HEAD. Dòng và đoạn trích sẽ được kiểm ở ref này."
             }
           }
         },
@@ -241,7 +248,7 @@
             },
             "quote": {
               "type": "string",
-              "description": "chuỗi chép NGUYÊN VĂN (>=8 ký tự) từ kết quả tool, code sẽ tìm lại trong nhật ký"
+              "description": "Một đoạn LIÊN TỤC từ 8 đến 200 ký tự chép nguyên văn từ kết quả tool, chọn đoạn không chứa dấu ngoặc kép, dấu nháy, gạch chéo ngược (bot so khớp bỏ qua các ký tự đó), không xuống dòng."
             },
             "source": {
               "type": "string"
@@ -345,6 +352,24 @@
           "items": {
             "type": "string"
           }
+        },
+        "layer": {
+          "type": "string",
+          "enum": [
+            "be",
+            "odoo",
+            "fe",
+            "mobile",
+            "infra",
+            "data",
+            "partner",
+            "unknown"
+          ],
+          "description": "Lớp chứa lỗi. Phân định bằng so sánh request/response (New Relic Transaction) và lỗi phía client: API trả đúng mà UI sai → fe/mobile; 5xx hoặc dữ liệu API sai → be/odoo. Bot đối chiếu với repo của code_location và ghi đè nếu lệch."
+        },
+        "client_version": {
+          "type": "string",
+          "description": "Phiên bản client của người báo/sự cố: platform, app version, bundle/CodePush, releaseStage, lấy từ Bugsnag/Sentry (mobile bắt buộc, web nên có). Chưa xác định được thì bắt đầu bằng 'không rõ' + lý do."
         }
       }
     },

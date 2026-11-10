@@ -72,16 +72,16 @@ Gói cho người trực (loại C hoặc ứng viên chưa đủ bằng chứng
 | `priorart.py` | Tìm ticket cũ đã đóng giống ticket mới (trùng / "không phải bug") |
 | `evalkit.py` | Chấm điểm một lần chạy so với `expect` của case |
 | `agent/RULES.md` | Luật cho model: phân loại, quy trình điều tra theo giả thuyết, **bản đồ tra cứu**. Biến môi trường `{ENV_NAME}`, `{NR_PREFIX}`… lấy từ `config.json` |
-| `agent/playbooks/` | Playbook theo loại lỗi (chuỗi lỗi, cổng điều kiện, cấu hình/flag, regression); model chỉ đọc khi cần |
+| `agent/playbooks/` | Playbook theo loại lỗi (chuỗi lỗi, cổng điều kiện, cấu hình/flag, regression, **web/mobile**); bot ghi bản đã thay biến vào `data/playbooks/` mỗi lần chạy, model chỉ đọc khi cần |
 | `agent/VERIFIER.md`, `verifier_schema.json` | Lượt kiểm tra độc lập cho ticket loại C |
 | `agent/schema.json` | Định dạng kết quả: `evidence` 3 bước + `rca` (code_location, mechanism, decisive_signal, causal_chain, alternatives…) |
 | `config.json` | ID sandbox, nguồn lịch trực, `env`, `gate`, `verifier`, ngân sách, ảnh đính kèm, prior art, repo tri thức |
 | `cases/` | Case thử có kết quả mong đợi (`_TEMPLATE-bug-from-pr.json`: mẫu case bug có đáp án) |
 | `evals/` | `baseline.json` (điểm chuẩn) và `fixtures/` (lần chạy đã đóng băng) |
 | `tests/` | Test logic, không gọi mạng; `python3 tests/run_all.py` chạy tất cả |
-| `tools/setup.sh` | Clone tri thức (chỉ đọc, kèm lịch sử git có giới hạn) + sinh chỉ mục + cài DBHub |
-| `tools/gen_anchors.py` | Sinh `knowledge/_anchors/` (route → handler, mã lỗi → nơi raise, bảng → entity, SHA đã clone) |
-| `tools/repo_git_mcp.py` | MCP git chỉ đọc (`git_head/log/blame/show`) cho các bản clone |
+| `tools/setup.sh` | Clone tri thức (chỉ đọc, kèm lịch sử git có giới hạn) + sinh anchors (`_anchors/`) + cài DBHub |
+| `tools/gen_anchors.py`, `tools/anchors_client.py` | Sinh `knowledge/_anchors/`: backend (service, route → handler, mã lỗi, bảng, SHA đã clone) và client (chuỗi UI, lời gọi API, màn hình, cạnh client → backend, mã lỗi ↔ chuỗi UI) |
+| `tools/repo_git_mcp.py` | MCP git chỉ đọc (`git_head/log/blame/show/tags/file`; `ref` để đọc code đúng phiên bản app) cho các bản clone |
 | `tools/eval.py` | Chạy case N lần, chấm điểm, so baseline |
 | `usage.py`, `tools/usage_report.py` | Ghi và tổng hợp token/chi phí mỗi lần phân tích |
 | `tools/dbhub-stg.py` | Chạy DBHub trên Postgres staging, read-only |
@@ -138,11 +138,62 @@ Windows: dùng `python` thay `python3`; chạy `tools/setup.sh` bằng Git Bash.
 
 Chi phí khoảng $0,03–0,7 mỗi ticket (sonnet). Cùng một case có thể ra kết luận khác nhau giữa các lần chạy, nên khi đánh giá cần chạy nhiều lần.
 
+## Chi phí: cái gì thật sự tốn tiền (đo 10/11/2026)
+
+Chi phí mỗi lần phân tích gần như tỷ lệ với **số lượt × đầu vào cố định mỗi lượt**, không phải với lượng code đọc. Đầu vào cố định là luật + định nghĩa tool của mọi MCP, và model đọc lại nó ở **mọi** lượt:
+
+| Cấu hình MCP | Token cố định mỗi lượt |
+|---|---|
+| Tất cả (Sentry 73 tool, Bugsnag 19, New Relic 33, + DB, git) | **132k** |
+| Sentry riêng | 86k |
+| New Relic riêng | 32k |
+| Bugsnag riêng | 26k |
+| Chỉ `repogit` | vài k |
+| Cắt tool không bao giờ dùng (`--disallowedTools`) | Sentry 86k → 23k, New Relic 32k → 20k, Bugsnag 26k → 16k |
+
+Vì vậy bot chỉ bật MCP phù hợp với Product của ticket (`config.json` → `products.map.<Product>.mcp`: Bugsnag cho Biz/Mall App, Sentry cho Mall Web, backend chỉ New Relic + DB + git) và cắt các tool ngoài `READ_TOOLS` (danh sách tool tự khám phá từ sự kiện init của CLI, lưu `data/mcp_tools.json`). Cùng case voucher: 0,6-1,4M token và $0,32 mỗi lần chạy xuống 0,2-0,4M token và $0,10-0,18 (cache nóng).
+
+**Verifier tắt mặc định** (`verifier.enabled: false`): mỗi lần chạy thêm $0,17-0,25 (có lần 600k token) và chưa đáng tin trên DMW-2203 (bắt đúng 1 lần, FAIL nhầm 1 lần đúng, PASS nhầm 1 lần sai). Việc chặn kết luận thiếu bằng chứng do `rca.py` làm bằng code, không tốn token.
+
+**Không dùng chỉ mục mã nguồn** (đã thử rồi bỏ): một chỉ mục cục bộ SQLite FTS5 (tìm theo định danh/chuỗi lỗi, mỗi lần tra 600-750 token) cho độ đúng và chi phí tương đương việc Grep + đọc đúng đoạn, ở 6 lần chạy voucher và 8 lần DMW-2203. Nó còn thêm khoảng 181 MB, phải build lại khi repo đổi (hit cũ phải gắn STALE) và làm model dễ dừng ở hit đầu bảng (mã lỗi 4064 được ném ở nhiều handler, lần chạy có index chọn nhầm handler 2/3 lần). Cái quyết định độ đúng là quy trình điều tra (`RULES.md`, playbook) và bằng chứng runtime; cái quyết định chi phí là số lượt × đầu vào cố định mỗi lượt. Định vị code dùng `_anchors/` (route, mã lỗi, chuỗi UI, cầu nối client → route → handler) rồi Grep hẹp và Read đúng đoạn. Nếu sau này cần thử lại cho repo FE/mobile rất lớn thì đo trước bằng case có đáp án (`tools/eval.py`).
+
+**DMW-2203 (Jira, bug BE mức High, đã sửa ở commit `c986f3c0`; `cases/dmw-2203-flash-sale-min-discount.json`)**: thiếu kiểm tra mức giảm tối thiểu 1.000đ ở Flash Sale PDP. Đáp án: `ValidateProductFlashSale` trong `DiscountCampaign.cs` không gọi `GetMinDiscountValue()`. Chạy trên bản clone lùi về trước commit sửa:
+
+| Lần chạy | Vị trí bot trả | Verdict bot đăng |
+|---|---|---|
+| 4 lần đầu (chưa có playbook, có verifier) | 1/4 đúng; 3/4 trỏ vào `CreatePdpPortalDiscountCampaignCommandValidator` | 1 lần **`C` sai mà tự tin**, còn lại `?` |
+| 4 lần sau (playbook `missing-rule.md`, dấu hiệu runtime phải từ tool runtime) | **4/4 đúng** | `?` (đúng: product-service không có New Relic ở staging, DB không kết nối được) |
+
+Hai thay đổi sau lần đầu: (1) `decisive_signal` chỉ được tính khi chuỗi trích nằm trong kết quả của tool runtime (New Relic, DB, Bugsnag, Sentry), một dòng code vừa `Read` không còn được coi là "dấu hiệu runtime"; (2) playbook `agent/playbooks/missing-rule.md` bắt lần đủ mọi tầng (route → validator → domain → service) và tìm luồng anh em đang thực thi quy tắc. **Lưu ý:** playbook được viết sau khi thấy ticket này sai, nên 4/4 chưa phải kiểm chứng độc lập; cần thêm bug có đáp án khác.
+
+Giới hạn còn lại: với loại bug "thiếu kiểm tra" ở service không có New Relic, bot chỉ có thể trả "ứng viên nguyên nhân", không bao giờ `C`, vì bot chỉ đọc và không được tạo dữ liệu để tái hiện.
+
+## Backend nhiều repo, web và mobile
+
+Bot đọc code ở **đúng repo của lớp có lỗi**, khai trong `config.json` → `knowledge` (mỗi repo có `layer`, `branch` riêng) và ghép Product → repo → công cụ lỗi client ở `products.map`:
+
+| Lớp | Repo | Ghi chú |
+|---|---|---|
+| `be` | `mono-backend` (nhánh `dev`: 24 service C#, Java/Kotlin, TypeScript), `openim-server` (Go), `assistant-service`, `recommender-service` (Python) | Danh sách repo backend lấy từ handbook `templates/repository-context.md`. Nhánh mặc định khác nhau (dev hoặc main) |
+| `odoo` | `droppii-odoo` | WMS |
+| `mobile` | `biz-mobile` (Biz App), `customer-mobile` (Mall App) | Bugsnag. Mỗi người dùng một phiên bản (binary + bundle CodePush) |
+| `fe` | `web-mall` (Mall Web), `b2b-client` (Biz Web), `dashboards` (PDP Portal, OBEFE), `erp-dashboard`, `gamification` (app web Next.js) | Sentry (web-mall); các web khác chưa rõ |
+
+Ghép Product ↔ repo **suy ra từ handbook, chưa được Dev FE/Mobile xác nhận** (`confirmed: false`). Nhánh của repo FE/mobile là nhánh mặc định, chưa chắc là bản đang chạy trên staging.
+
+`tools/gen_anchors.py` sinh `knowledge/_anchors/` để bot định vị mà không phải Grep mù: `services.md` (service → repo/thư mục, theo tiền tố gateway `/<tên>-service`), `routes.md`, `errors.md`, `tables.md`, và cho client: `ui-texts.md` (chuỗi UI → key i18n → component), `api-calls.md`, `screens.md`, **`edges.md`** (nơi client gọi API → route → handler ở backend, có `confidence`), `error-map.md` (mã lỗi backend ↔ chuỗi UI ↔ nơi client xử lý). Đây là cách làm tương đương "cạnh xuyên repo" của Brain trong brain-agent-kit, bằng chỉ mục tĩnh thay cho graph. Chỉ là chỗ định vị, không phải bằng chứng.
+
+Lỗi mobile bắt buộc có `rca.client_version` (phiên bản app/bundle lấy từ Bugsnag/Sentry) mới được kết luận; `git_tags`/`git_file`/`git_blame ref` đọc code đúng bản đó và bot kiểm trích dẫn ở đúng `ref`.
+
+**Đã kiểm chứng trên code thật (10/11/2026, clone nông các repo trên):** 24 service, 2.351 route, 644 hằng số mã lỗi, 12.892 chuỗi UI, 368 lời gọi API (phân giải cả `END_POINTS.X.Y`), 273 cạnh client → backend (61 `high`, 104 `medium`, 12 `low`, 96 chỉ biết service). Ví dụ `error-map`: `4064 PROMOTION_NOT_FOUND_OR_UNAVAILABLE` = "Khuyến mãi không tồn tại hoặc không khả dụng" nối tới `promotion-service` và nơi client xử lý. Chạy model thật trên case `stg-voucher-ended` chỉ từ chuỗi UI trong ticket: bot lần ra `ClaimVoucherCommandHandler.java:73-77` (đáp án 73-76), kèm link ghim SHA; dừng ở `?` vì máy thử không có DB staging (A/B đòi 3/3).
+
+**Giới hạn đã biết** (xem cột `Routes found` trong `services.md`): bộ quét chưa hiểu route của `schedule-service`, `search-service`, `serverless`, `strapi-service` (0 route) và `api-gateway` (1), Go chỉ thấy route ghi trực tiếp (không giải nhóm `Group("/v1")`), FastAPI không giải `APIRouter(prefix)`. `web-mall` hard-code tiếng Việt trong component nên không có bảng key: Grep thẳng. Lời gọi Strapi (`${STRAPI_BASE_URL}/api/...`) không có controller tương ứng nên không nối được. Chưa chạy trên `droppii-odoo`, `dashboards`, `erp-dashboard`.
+
 ## Bằng chứng RCA và cách đo
 
 - **Cổng theo loại ticket** nằm ở `config.json` → `gate`. Đây là thay đổi so với quyết định "cả 3 bước khớp" của Dev BE (06/11): với **bug code (C)** cổng không còn đòi bước DB (NPE trong New Relic + dòng code gây lỗi đã đủ nếu có cơ chế và đã loại giả thuyết khác). A/B/D vẫn đòi 3/3. Muốn quay lại luật cũ cho C: đặt `"C": ["source_be", "db", "newrelic"]`. **Cần Dev BE xác nhận thay đổi này.**
 - **Đo:** `tools/eval.py` chấm từng lần chạy (verdict, chuỗi bắt buộc, `file:dòng` đúng, không bịa trích dẫn, ngân sách tool/chi phí), chạy N lần vì cùng một case có thể ra kết luận khác nhau. Điểm 1.0 / 0.5 / 0.05; fail nếu một case tụt quá 0.2 hoặc điểm trung bình tụt so với `evals/baseline.json`.
-- **Chưa có case bug có đáp án.** 4 case hiện tại đều ra `?` hoặc "đúng thiết kế". Dựng case từ bug Jira đã đóng có PR fix theo `cases/_TEMPLATE-bug-from-pr.json` (đáp án `file:dòng` lấy từ diff của PR); đây là việc quan trọng nhất để biết bot có tìm đúng dòng code lỗi hay không.
+- **Chưa có case bug có đáp án** (BE, FE lẫn mobile; mẫu: `cases/_TEMPLATE-bug-from-pr.json`, `cases/_TEMPLATE-fe-mobile-bug.json` có thêm `layer` và phiên bản app). 4 case hiện tại đều ra `?` hoặc "đúng thiết kế". Dựng case từ bug Jira đã đóng có PR fix theo `cases/_TEMPLATE-bug-from-pr.json` (đáp án `file:dòng` lấy từ diff của PR); đây là việc quan trọng nhất để biết bot có tìm đúng dòng code lỗi hay không.
 - **Fixture:** log New Relic hết hạn sau ~30 ngày. `tools/eval.py --freeze case=log` lưu lần chạy tốt vào `evals/fixtures/`, `--from-fixtures` chấm lại miễn phí. Lưu ý: nó chấm lại câu trả lời đã ghi, không chạy lại agent trên kết quả tool đã ghi.
 
 ## Token và chi phí mỗi lần phân tích

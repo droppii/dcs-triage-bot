@@ -41,6 +41,13 @@ Chưa có con số nào ở trên được đo: hiện **chưa có case bug có 
 - [ ] Xác định cách lấy SHA/nhánh đang chạy trên PROD (deployment marker New Relic, tag image, hoặc nhánh release) và đặt `knowledge[].branch` cho đúng. `rca.code_version` ghi kết quả đối chiếu cho từng ticket.
 - [ ] Nếu bản đang chạy cũ hơn lịch sử đã clone (`history_days`), tăng `history_days` hoặc ghi rõ "ngoài lịch sử".
 
+**Backend nhiều repo, web, mobile.**
+- [ ] Dev FE/Mobile xác nhận `config.json` → `products.map` (Product ↔ repo ↔ Bugsnag/Sentry project) và nhánh của từng repo (`confirmed: true`); đặt nhánh đúng bản đang chạy cho staging rồi cho PROD.
+- [ ] Xác định cách đổi phiên bản app thành commit (tag `vX.Y.Z`? CodePush label?) và có nhận được từ Bugsnag/Sentry không (`rca.client_version`, `git_tags`). Mobile chưa xác định được phiên bản thì bot không kết luận.
+- [ ] Xác nhận source map của Sentry/Bugsnag cho từng app, nếu không `file:dòng` từ stack chỉ là dòng trong bundle.
+- [ ] Rà `knowledge/_anchors/services.md`: các service có `Routes found = 0` (schedule, search, serverless, strapi) cần bộ quét riêng hoặc để model đọc thẳng.
+- [ ] Windows: clone dùng `core.longpaths` (đã đặt trong `setup.sh`), đường dẫn repo càng ngắn càng tốt (mono-backend có đường dẫn dài hơn 260 ký tự). Dòng lệnh `claude` không dài hơn 32.767 ký tự: bot đã chuyển luật và cấu hình MCP sang file, prompt qua stdin.
+
 **Quan sát.**
 - [ ] Xác nhận account New Relic, tên entity PROD, thời gian giữ log; log PROD có thể khác staging (ví dụ promotion-service).
 - [ ] Kiểm chứng các cách lấy stack trace ghi trong `RULES.md` ("Tìm stack trace") trên New Relic thật và cập nhật mục đó.

@@ -20,6 +20,7 @@ g('init', '-q', '-b', 'dev')
 f = repo / 'src/A.java'
 f.write_text('class A {\n  int x = 1;\n  int y = 2;\n}\n')
 g('add', '.'); g('commit', '-qm', 'add A')
+g('tag', 'v1.0.0')
 f.write_text('class A {\n  int x = 1;\n  int y = null;\n}\n')
 g('commit', '-qam', 'break y')
 (base / 'other').mkdir()          # not a repo: must be unreachable
@@ -49,7 +50,7 @@ def tool(name, **args):
 init = rpc('initialize', {'protocolVersion': '2025-03-26'})['result']
 assert init['serverInfo']['name'] == 'repogit' and init['protocolVersion'] == '2025-03-26'
 rpc('notifications/initialized', notify=True)   # no reply expected; the next call must still line up
-assert {t['name'] for t in rpc('tools/list')['result']['tools']} == {'git_head', 'git_log', 'git_blame', 'git_show'}
+assert {t['name'] for t in rpc('tools/list')['result']['tools']} == {'git_head', 'git_log', 'git_tags', 'git_file', 'git_blame', 'git_show'}
 
 text, err = tool('git_head', repo='svc')
 assert not err and sha_break in text and 'branch: dev' in text and 'commits in clone: 2' in text, text
@@ -60,6 +61,20 @@ assert not err and sha_break[:7] in text and 'y = null' in text, text
 text, err = tool('git_show', repo='svc', sha=sha_break[:10], path='src/A.java')
 assert not err and '-  int y = 2;' in text and '+  int y = null;' in text, text
 
+# mobile: map an app version to a commit, then read / blame / log the code AS OF that version
+text, err = tool('git_tags', repo='svc', pattern='v1*')
+assert not err and text.startswith('v1.0.0 | ') and sha_break[:7] not in text, text
+text, err = tool('git_file', repo='svc', ref='v1.0.0', path='src/A.java', line_start=1, line_end=4)
+assert not err and '3:   int y = 2;' in text and 'null' not in text, text            # the released version, not HEAD
+text, err = tool('git_file', repo='svc', ref='HEAD', path='src/A.java', line_start=3, line_end=3)
+assert not err and '3:   int y = null;' in text, text
+text, err = tool('git_log', repo='svc', ref='v1.0.0', path='src/A.java')
+assert not err and 'add A' in text and 'break y' not in text, text                   # history up to that tag only
+text, err = tool('git_blame', repo='svc', ref='v1.0.0', path='src/A.java', line_start=3, line_end=3)
+assert not err and 'y = 2' in text and sha_break[:7] not in text, text
+text, err = tool('git_tags', repo='svc', pattern='zzz*')
+assert not err and 'no tags match' in text
+
 # everything unsafe is refused with isError, never executed
 for name, args in [('git_head', {'repo': 'other'}), ('git_head', {'repo': '../'}), ('git_head', {'repo': 'svc/../other'}),
                    ('git_log', {'repo': 'svc', 'path': '../x'}), ('git_log', {'repo': 'svc', 'path': '-p'}),
@@ -68,6 +83,12 @@ for name, args in [('git_head', {'repo': 'other'}), ('git_head', {'repo': '../'}
                    ('git_show', {'repo': 'svc', 'sha': '--output=/tmp/pwn'}),
                    ('git_show', {'repo': 'svc', 'sha': 'HEAD; rm -rf /'}),
                    ('git_blame', {'repo': 'svc', 'path': 'src/A.java', 'line_start': 1, 'line_end': 900}),
+                   ('git_log', {'repo': 'svc', 'ref': '--output=/tmp/pwn'}), ('git_log', {'repo': 'svc', 'ref': 'v1.0.0..HEAD'}),
+                   ('git_blame', {'repo': 'svc', 'path': 'src/A.java', 'line_start': 1, 'line_end': 2, 'ref': '-p'}),
+                   ('git_tags', {'repo': 'svc', 'pattern': '--contains HEAD'}), ('git_tags', {'repo': 'svc', 'pattern': '-a'}),
+                   ('git_file', {'repo': 'svc', 'ref': 'HEAD', 'path': '../x', 'line_start': 1, 'line_end': 2}),
+                   ('git_file', {'repo': 'svc', 'ref': '', 'path': 'src/A.java', 'line_start': 1, 'line_end': 2}),
+                   ('git_file', {'repo': 'svc', 'ref': 'HEAD', 'path': 'src/A.java', 'line_start': 1, 'line_end': 900}),
                    ('git_push', {'repo': 'svc'})]:
     text, err = tool(name, **args)
     assert err and text.startswith('error:'), (name, args, text)

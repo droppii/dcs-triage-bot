@@ -35,13 +35,16 @@ def ev(kind, **kw):
     return json.dumps(kw | {'type': kind})
 NR = 'TransactionError: java.lang.NullPointerException: Cannot invoke "Warehouse.getUuid()" because "w" is null'
 transcript = '\n'.join([
-    ev('assistant', message={'content': [{'type': 'tool_use', 'name': 'mcp__newrelic__execute_nrql_query', 'input': {'q': 'x'}}]}),
-    ev('user', message={'content': [{'type': 'tool_result', 'content': [{'type': 'text', 'text': NR}]}]}),
-    ev('assistant', message={'content': [{'type': 'tool_use', 'name': 'Read', 'input': {'file_path': str(JAVA)}}]}),
+    ev('assistant', message={'content': [{'type': 'tool_use', 'id': 't1', 'name': 'mcp__newrelic__execute_nrql_query', 'input': {'q': 'x'}}]}),
+    ev('user', message={'content': [{'type': 'tool_result', 'tool_use_id': 't1', 'content': [{'type': 'text', 'text': NR}]}]}),
+    ev('assistant', message={'content': [{'type': 'tool_use', 'id': 't2', 'name': 'Read', 'input': {'file_path': str(JAVA)}}]}),
+    ev('user', message={'content': [{'type': 'tool_result', 'tool_use_id': 't2', 'content': 'const id = cart.getWarehouse().getUuid(); // static code read'}]}),
     ev('result', is_error=False, structured_output={}, total_cost_usd=0.1),
 ])
 tr = rca.parse_transcript(transcript)
-assert len(tr['tool_uses']) == 2 and NR in tr['results'] and tr['final']['total_cost_usd'] == 0.1
+# files the (fake) model was shown by Grep in this run, besides the Read of CartServiceImpl.java above
+tr['results'] += '\n1. biz-mobile/src/CartScreen.tsx:1-4 [mobile/code]\n2. engineering-knowledge/handbook/pack.md:1-2 [docs/docs]\n3. Dup.java Uniq.java'
+assert len(tr['tool_uses']) == 2 and NR in tr['results'] and NR in tr['runtime'] and 'static code read' not in tr['runtime'] and tr['final']['total_cost_usd'] == 0.1
 
 
 def make(**over):
@@ -180,5 +183,160 @@ hits = priorart.similar({'Title': 'Không lưu được voucher KM03', 'Descript
                         rows, F, {'Done'})
 assert [h['code'] for h in hits] == ['D1'] and 'đúng thiết kế' in hits[0]['resolution'], hits   # open/unresolved ones excluded
 assert priorart.similar({'Title': '', 'Description': ''}, rows, F, {'Done'}) == []
+
+# ===== FE / mobile: layer from the repo, version-pinned citations, client_version gate =====
+import subprocess
+MOB = K / 'biz-mobile'
+MOB.mkdir()
+def mg(*a):
+    subprocess.run(['git', '-C', str(MOB), '-c', 'user.name=T', '-c', 'user.email=t@x.io', *a], check=True, capture_output=True)
+mg('init', '-q', '-b', 'main')
+(MOB / 'src').mkdir()
+cart = MOB / 'src/CartScreen.tsx'
+cart.write_text('export function Cart() {\n  const id = cart.warehouse.uuid;\n  return id;\n}\n', encoding='utf-8')   # released code
+mg('add', '.'); mg('commit', '-qm', 'v3.12.0'); mg('tag', 'v3.12.0')
+cart.write_text('// refactor\nexport function Cart() {\n  const id = cart.warehouse?.uuid;\n  return id;\n}\n', encoding='utf-8')  # HEAD differs
+mg('commit', '-qam', 'refactor')
+LAYERS = {'mono-backend': 'be', 'biz-mobile': 'mobile'}
+
+
+def mobile(**loc_over):
+    o = make()
+    o['rca']['layer'] = 'be'                                  # the model guessed wrong
+    o['rca']['code_location'] = {'file': 'biz-mobile/src/CartScreen.tsx', 'line_start': 2, 'line_end': 2, 'symbol': 'Cart',
+                                 'snippet': 'cart.warehouse.uuid', 'ref': 'v3.12.0'} | loc_over
+    o['rca']['client_version'] = 'Biz Mobile 3.12.0 iOS, bundle CodePush v45, releaseStage staging (Bugsnag)'
+    return o
+
+
+# the cited line only exists in the released tag, not in HEAD: it verifies at ref, fails without it
+o = mobile()
+probs = rca.validate(o, tr, K, LAYERS)
+assert o['rca']['code_location']['verified'], probs
+assert o['rca']['layer'] == 'mobile' and o['rca']['layer_derived'] == 'mobile'              # repo decides, claim overridden
+assert any(p.startswith('layer:') and 'be' in p for p in probs), probs                      # and the mismatch is reported
+o2 = mobile(ref='')
+rca.validate(o2, tr, K, LAYERS)
+assert not o2['rca']['code_location']['verified']                                           # HEAD has uuid?. not uuid
+for bad_ref in ('v9.9.9', '--output=/tmp/pwn', 'v3.12.0..main', '-p'):
+    o3 = mobile(ref=bad_ref)
+    rca.validate(o3, tr, K, LAYERS)
+    assert not o3['rca']['code_location']['verified'], bad_ref
+
+# mobile bug needs the client version, even though config gate for C does not list it
+o = mobile()
+rca.validate(o, tr, K, LAYERS)
+assert rca.gate_failures(o) == [] and rca.verdict(o) == 'C'
+for v in ('', 'không rõ: Bugsnag không có sự kiện của người dùng này'):
+    o = mobile()
+    o['rca']['client_version'] = v
+    rca.validate(o, tr, K, LAYERS)
+    assert rca.gate_failures(o) == ['client_version'] and rca.verdict(o) == '?', v
+# an FE (web) bug is not forced to state a client version; neither is BE
+o = make()
+o['rca']['layer'] = 'be'
+rca.validate(o, tr, K, LAYERS)
+assert rca.verdict(o) == 'C' and o['rca']['layer'] == 'be' and o['rca']['layer_derived'] == 'be'
+# without a layers map nothing changes (older callers)
+o = make()
+rca.validate(o, tr, K)
+assert o['rca']['layer_derived'] is None and rca.verdict(o) == 'C'
+
+# rendering: layer, client version, link pinned to the released tag instead of the clone's HEAD
+o = mobile()
+rca.validate(o, tr, K, LAYERS)
+o['_versions'] = {'biz-mobile': {'sha': 'c' * 40, 'branch': 'main', 'date': '2026-11-09'}}
+know2 = know + [{'name': 'biz-mobile', 'url': 'https://github.com/droppii/biz-mobile.git', 'branch': 'main'}]
+text = '\n'.join(rca.render_rca(o, know2, K, confirmed=True))
+assert 'Lớp lỗi: mobile (code đọc ở v3.12.0)' in text and 'Phiên bản client: Biz Mobile 3.12.0' in text, text
+assert 'https://github.com/droppii/biz-mobile/blob/v3.12.0/src/CartScreen.tsx#L2' in text, text
+assert 'phiên bản app/bundle' == rca.CHECK_LABEL['client_version']
+
+# --- a bare file name / partial path resolves only when exactly one file matches (models often cite "Foo.java:73") ---
+(K / 'mono-backend/y').mkdir(); (K / 'biz-mobile/z').mkdir()
+(K / 'mono-backend/y/Dup.java').write_text('class A {}\n'); (K / 'biz-mobile/z/Dup.java').write_text('class B {}\n')
+(K / 'mono-backend/y/Uniq.java').write_text('class U {}\n')
+rca._NAMES['dir'] = None                                                  # fixtures were added after the cached index
+assert rca.resolve_path('CartServiceImpl.java', K) == JAVA.resolve()
+assert rca.resolve_path('Uniq.java', K) == (K / 'mono-backend/y/Uniq.java').resolve()
+assert rca.resolve_path('order/CartServiceImpl.java', K) == JAVA.resolve()
+assert rca.resolve_path('Dup.java', K) is None                            # ambiguous: refuse, do not guess
+assert rca.resolve_path('y/Dup.java', K) == (K / 'mono-backend/y/Dup.java').resolve()   # disambiguated by a partial path
+assert rca.resolve_path('Nope.java', K) is None and rca.resolve_path('../Uniq.java', K) is None
+sbare = make()
+sbare['evidence']['source_be']['detail'] = 'CartServiceImpl.java:40 gọi getUuid'                # no directory, as the model often writes
+sbare['rca']['code_location']['file'] = 'CartServiceImpl.java'
+rca.validate(sbare, tr, K)
+assert sbare['evidence']['source_be']['status'] == 'confirmed' and sbare['rca']['code_location']['verified'], sbare['_problems']
+
+# --- a file in a docs repo is documentation, never the location of a defect (spec-to-test "aspire-docs" trap) ---
+(K / 'engineering-knowledge/handbook').mkdir(parents=True)
+(K / 'engineering-knowledge/handbook/pack.md').write_text('line1\nconst id = cart.warehouse.uuid;\n', encoding='utf-8')
+dl = make()
+dl['rca']['code_location'] = {'file': 'engineering-knowledge/handbook/pack.md', 'line_start': 2, 'line_end': 2, 'symbol': '',
+                              'snippet': 'cart.warehouse.uuid', 'ref': ''}
+rca.validate(dl, tr, K, {'mono-backend': 'be', 'engineering-knowledge': 'docs'})
+assert not dl['rca']['code_location']['verified'] and any('repo tài liệu' in p for p in dl['_problems'])
+assert rca.verdict(dl) == '?' and 'code_location' in rca.gate_failures(dl)
+dok = make()                                     # the same claim in a real code repo is unaffected
+rca.validate(dok, tr, K, {'mono-backend': 'be', 'engineering-knowledge': 'docs'})
+assert dok['rca']['code_location']['verified'] and rca.verdict(dok) == 'C'
+
+# --- the decisive signal must come from a RUNTIME tool: a code line the model just Read is not "what happened" (DMW-2203 passed the
+#     gate with a Read of the validator as its "runtime signal" and was wrong) ---
+code_sig = make()
+code_sig['rca']['decisive_signal']['quote'] = 'const id = cart.getWarehouse().getUuid(); // static code read'
+rca.validate(code_sig, tr, K)
+assert not code_sig['rca']['decisive_signal']['verified'] and any('không phải dấu hiệu runtime' in p for p in code_sig['_problems']), code_sig['_problems']
+assert rca.verdict(code_sig) == '?' and 'runtime_signal' in rca.gate_failures(code_sig)
+rt_sig = make()                                                                    # same claim, but the line really came from New Relic
+rca.validate(rt_sig, tr, K)
+assert rt_sig['rca']['decisive_signal']['verified'] and rca.verdict(rt_sig) == 'C'
+unlinked = rca.parse_transcript(json.dumps({'type': 'user', 'message': {'content': [{'type': 'tool_result', 'content': NR}]}}))
+assert unlinked['runtime'] == ''                                                   # a result we cannot attribute to a runtime tool is static
+
+# --- a cited file must have been shown to the model in THIS run (Grep / Read), never remembered or invented ---
+unseen = make()
+unseen['rca']['code_location']['file'] = 'mono-backend/java/order/CartServiceImpl.java'
+quiet = rca.parse_transcript('')                                         # run in which nothing was searched or read
+rca.validate(unseen, quiet, K)
+assert not unseen['rca']['code_location']['verified'] and any('chưa xuất hiện' in p for p in unseen['_problems']), unseen['_problems']
+assert rca.verdict(unseen) == '?'
+seen_by_search = rca.parse_transcript(json.dumps({'type': 'user', 'message': {'content': [{'type': 'tool_result', 'content': [
+    {'type': 'text', 'text': '1. mono-backend/java/order/CartServiceImpl.java:36-41 [be/code] best line 40'}]}]}}))
+ok_seen = make()
+rca.validate(ok_seen, seen_by_search, K)
+assert ok_seen['rca']['code_location']['verified'], ok_seen['_problems']                  # shown by search: fine
+seen_by_read = rca.parse_transcript(json.dumps({'type': 'assistant', 'message': {'content': [
+    {'type': 'tool_use', 'name': 'Read', 'input': {'file_path': 'C:/x/knowledge/mono-backend/java/order/CartServiceImpl.java'}}]}}))
+ok_read = make()
+rca.validate(ok_read, seen_by_read, K)
+assert ok_read['rca']['code_location']['verified'], ok_read['_problems']                  # opened with Read: fine
+
+# --- a code candidate without a runtime signal says so (an error code can be thrown from several handlers) ---
+nr = make()
+rca.validate(nr, tr, K)
+nr['_versions'] = {}
+assert 'chưa có dấu hiệu runtime khớp' not in '\n'.join(rca.render_rca(nr, know, K, confirmed=True))
+nr2 = make()
+nr2['rca']['decisive_signal']['quote'] = 'a line that no tool ever returned'
+rca.validate(nr2, tr, K)
+nr2['_versions'] = {}
+assert 'chưa có dấu hiệu runtime khớp' in '\n'.join(rca.render_rca(nr2, know, K, confirmed=False))
+
+# --- loose comparison: quotes / backslashes / whitespace do not matter (they break the model's JSON, so it is told to drop them) ---
+assert rca.loose(' a "b" \\ x `c` ') == 'abxc' and rca.loose("it's") == 'its'
+q2 = make()
+q2['rca']['decisive_signal']['quote'] = 'Cannot invoke Warehouse.getUuid() because w is null'        # quotes dropped by the model
+rca.validate(q2, tr, K)
+assert q2['rca']['decisive_signal']['verified']
+q3 = make()
+q3['rca']['code_location']['snippet'] = 'String id = cart.getWarehouse().getUuid();'                  # the file line has the same code
+rca.validate(q3, tr, K)
+assert q3['rca']['code_location']['verified']
+q4 = make()
+q4['rca']['decisive_signal']['quote'] = 'Cannot invoke Warehouse.getName() because w is null'        # a different method: still rejected
+rca.validate(q4, tr, K)
+assert not q4['rca']['decisive_signal']['verified']
 
 print('ok rca')

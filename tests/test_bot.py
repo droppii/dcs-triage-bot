@@ -68,6 +68,127 @@ assert 'mcp__repogit' in bot.READ_TOOLS and 'mcp__dbhub' in bot.READ_TOOLS
 # the model only ever gets read tools: no Bash/Write/Edit anywhere in the allowlist
 assert not any(t.split('(')[0] in ('Bash', 'Write', 'Edit', 'NotebookEdit') for t in bot.READ_TOOLS)
 
+# rules + playbooks: every {PLACEHOLDER} is resolved (the model reads playbooks as plain files), product map is rendered
+import re as _re
+_rules = bot.rules()
+assert not _re.findall(r'\{[A-Z_]+\}', _rules), _re.findall(r'\{[A-Z_]+\}', _rules)
+for _f in bot.PLAYBOOKS_DIR.glob('*.md'):
+    assert not _re.findall(r'\{[A-Z_]+\}', _f.read_text(encoding='utf-8')), _f.name
+assert {f.name for f in bot.PLAYBOOKS_DIR.glob('*.md')} >= {'errors.md', 'fe-mobile.md', 'regression.md'}
+assert '- Biz App: lớp mobile; repo `biz-mobile`' in _rules and '- Mall Web: lớp fe; repo `web-mall`' in _rules
+assert 'chưa xác nhận' in bot.product_map_text() and bot.REPO_LAYER['biz-mobile'] == 'mobile' and bot.REPO_LAYER['mono-backend'] == 'be'
+assert str(bot.ANCHORS_DIR) in _rules and 'data' in str(bot.PLAYBOOKS_DIR)
+# every repo the product map points to is a configured clone with a client layer (a typo here would silently blind the bot)
+for _name, _v in bot.CFG['products']['map'].items():
+    for _r in _v['repos']:
+        assert bot.REPO_LAYER.get(_r) == _v['layer'], (_name, _r)
+
+# run_claude: nothing long on the command line (Windows stops at ~32k chars); prompt via stdin, rules + MCP config via files
+import json as _json, tempfile as _tf
+from pathlib import Path as _P
+_seen = {}
+_real_run, _real_logs, _real_ledger = bot.subprocess.run, bot.LOGS, bot.USAGE['ledger']
+def _fake_run(cmd, **kw):
+    _seen['cmd'], _seen['kw'] = list(cmd), kw
+    _seen['rules'] = _P(cmd[cmd.index('--append-system-prompt-file') + 1]).read_text(encoding='utf-8')
+    _seen['mcp'] = _json.loads(_P(cmd[cmd.index('--mcp-config') + 1]).read_text(encoding='utf-8'))
+    class _R: returncode = 0
+    return _R()
+bot.subprocess.run, bot.LOGS, bot.USAGE['ledger'] = _fake_run, _P(_tf.mkdtemp(prefix='dcs-logs-')), False
+try:
+    _long = 'x' * 100000
+    _log = bot.run_claude(_long, 'SYSTEM ' + 'r' * 50000, 'agent/schema.json', 'unit')
+finally:
+    bot.subprocess.run, bot.LOGS, bot.USAGE['ledger'] = _real_run, _real_logs, _real_ledger
+_cmd = _seen['cmd']
+assert _long not in ' '.join(_cmd) and _seen['kw']['input'] == _long, 'prompt must go through stdin'
+assert sum(len(a) + 1 for a in _cmd) < 30000, sum(len(a) + 1 for a in _cmd)          # real runs must stay under the Windows limit
+assert _seen['rules'].startswith('SYSTEM ') and 'mcpServers' in _seen['mcp'] and 'repogit' in _seen['mcp']['mcpServers']
+assert '--append-system-prompt' not in _cmd and _cmd.index('--allowedTools') > _cmd.index('--json-schema')   # variadic flag stays last
+assert not list(bot.RUN_DIR.glob('unit-*')), 'temp rules/mcp files must be removed after the run'
+_schema = _json.loads(_cmd[_cmd.index('--json-schema') + 1])
+assert 'rca' in _schema['properties'] and ' ' not in _cmd[_cmd.index('--json-schema') + 1][:20]
+# every backend repo the handbook lists is configured with its own default branch; gamification is the Next.js app, not a service
+for _n, _layer in (('mono-backend', 'be'), ('openim-server', 'be'), ('assistant-service', 'be'), ('recommender-service', 'be'),
+                   ('droppii-odoo', 'odoo'), ('gamification', 'fe')):
+    assert bot.REPO_LAYER.get(_n) == _layer, _n
+assert {k['name']: k['branch'] for k in bot.KNOWLEDGE_CFG}['recommender-service'] == 'main'
+assert {k['name']: k['branch'] for k in bot.KNOWLEDGE_CFG}['openim-server'] == 'dev'
+
+# MCP trimming: every server's tool definitions are re-read each turn (measured: Sentry ~86k tokens), so a run only gets the servers
+# its Product needs and none of the tools the bot never allows
+assert set(_json.loads(bot.mcp_config(['newrelic']))['mcpServers']) == {'newrelic'}
+assert {'sentry', 'bugsnag', 'newrelic', 'dbhub', 'repogit'} <= set(_json.loads(bot.mcp_config())['mcpServers'])
+_ps = bot.product_servers
+assert 'bugsnag' in _ps('Biz App') and 'sentry' not in _ps('Biz App') and 'newrelic' in _ps('Biz App') and 'repogit' in _ps('Biz App')
+assert 'bugsnag' in _ps('Mall App') and 'sentry' not in _ps('Mall App')
+assert 'sentry' in _ps('Mall Web') and 'bugsnag' not in _ps('Mall Web')
+assert 'sentry' not in _ps('Odoo') and 'bugsnag' not in _ps('Odoo') and 'dbhub' in _ps('Odoo')       # backend: no client tracker
+assert _ps('biz app') == _ps('Biz App') and _ps(' BIZ APP ') == _ps('Biz App')                       # tolerant of case / spaces
+assert 'sentry' in _ps('Some New Product') and 'bugsnag' in _ps(None) and 'sentry' in _ps('')       # unknown: do not blind the bot
+assert len(_ps('Odoo')) == len(set(_ps('Odoo')))
+_fake_tools = {'newrelic': ['mcp__newrelic__execute_nrql_query', 'mcp__newrelic__create_alert_condition'],
+               'sentry': ['mcp__sentry__find_organizations', 'mcp__sentry__update_issue', 'mcp__sentry__create_project'],
+               'dbhub': ['mcp__dbhub__execute_sql_stg_order'], 'repogit': ['mcp__repogit__git_log'],
+               'bugsnag': ['mcp__bugsnag__bugsnag_get_error', 'mcp__bugsnag__bugsnag_update_error']}
+_real_disc = bot.discover_mcp_tools
+bot.discover_mcp_tools = lambda force=False: _fake_tools
+try:
+    _den = bot.denied_tools(['newrelic', 'sentry', 'dbhub', 'repogit'])
+    assert sorted(_den) == ['mcp__newrelic__create_alert_condition', 'mcp__sentry__create_project', 'mcp__sentry__update_issue'], _den
+    assert not [t for t in bot.denied_tools(['dbhub', 'repogit'])]            # whole-server allowances are never trimmed
+    assert bot.denied_tools(['bugsnag']) == ['mcp__bugsnag__bugsnag_update_error']
+    assert bot.denied_tools(['sentry'])[0].startswith('mcp__sentry__') and not any(t in bot.READ_TOOLS for t in _den)
+    bot.discover_mcp_tools = lambda force=False: {}                            # tool lists unknown: nothing trimmed, nothing breaks
+    assert bot.denied_tools(['sentry']) == []
+    def _boom(force=False): raise RuntimeError('cli missing')
+    bot.discover_mcp_tools = _boom
+    assert bot.denied_tools(['sentry']) == []
+    bot.discover_mcp_tools = lambda force=False: _fake_tools
+    # the command a real run gets: only the Product's servers, the unwanted tools denied, --allowedTools still last
+    _seen2 = {}
+    def _fake_run2(cmd, **kw):
+        _seen2['cmd'] = list(cmd)
+        _seen2['mcp'] = _json.loads(_P(cmd[cmd.index('--mcp-config') + 1]).read_text(encoding='utf-8'))
+        class _R: returncode = 0
+        return _R()
+    bot.subprocess.run, bot.LOGS, bot.USAGE['ledger'] = _fake_run2, _P(_tf.mkdtemp(prefix='dcs-logs-')), False
+    try:
+        bot.run_claude('p', 'SYS', 'agent/schema.json', 'trim', servers=['newrelic', 'sentry', 'dbhub'])
+    finally:
+        bot.subprocess.run, bot.LOGS, bot.USAGE['ledger'] = _real_run, _real_logs, _real_ledger
+    _c = _seen2['cmd']
+    assert set(_seen2['mcp']['mcpServers']) == {'newrelic', 'sentry', 'dbhub'}
+    _di = _c.index('--disallowedTools')
+    assert 'mcp__sentry__update_issue' in _c[_di + 1:_c.index('--allowedTools')] and _di < _c.index('--allowedTools')
+    assert _c[_c.index('--allowedTools') + 1:] == bot.READ_TOOLS                                      # allowlist untouched and last
+    assert sum(len(a) + 1 for a in _c) < 30000
+finally:
+    bot.discover_mcp_tools = _real_disc
+
+# discovery: read the tool names from the CLI's init event, then kill the process before any model call; cached afterwards
+class _FakeProc:
+    def __init__(self, *a, **k):
+        self.killed, self.written = False, ''
+        init = {'type': 'system', 'subtype': 'init', 'tools': ['Read', 'mcp__sentry__a', 'mcp__sentry__b', 'mcp__newrelic__c']}
+        self.stdin = type('S', (), {'write': lambda s_, x: None, 'close': lambda s_: None})()
+        self.stdout = iter(['not json\n', _json.dumps({'type': 'assistant'}) + '\n', _json.dumps(init) + '\n', _json.dumps({'type': 'result'}) + '\n'])
+    def kill(self): self.killed = True
+_procs = []
+_real_popen, _real_root = bot.subprocess.Popen, bot.ROOT
+_tmp_root = _P(_tf.mkdtemp(prefix='dcs-root-'))
+(_tmp_root / 'agent').mkdir()
+bot.subprocess.Popen = lambda *a, **k: (_procs.append(_FakeProc()) or _procs[-1])
+bot.ROOT = _tmp_root
+try:
+    _found = bot.discover_mcp_tools(force=True)
+    assert _found == {'sentry': ['mcp__sentry__a', 'mcp__sentry__b'], 'newrelic': ['mcp__newrelic__c']} and _procs[0].killed, _found
+    assert (_tmp_root / 'data' / 'mcp_tools.json').exists()
+    _procs.clear()
+    assert bot.discover_mcp_tools() == _found and not _procs                  # second call: from cache, the CLI is not started again
+finally:
+    bot.subprocess.Popen, bot.ROOT = _real_popen, _real_root
+
 # created_at: ISO, epoch ms, missing (missing must NOT skip the 3-minute card wait)
 n = datetime(2026, 11, 6, 15, 0, tzinfo=bot.TZ)
 assert bot.created_at({'Date Created': '2026-11-06T14:58:00.000+07:00'}, n).minute == 58
