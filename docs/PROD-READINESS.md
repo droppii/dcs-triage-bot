@@ -2,6 +2,8 @@
 
 Hiện bot chỉ chạy staging (quyết định của Như, 06/11/2026). Tài liệu này là **đề xuất** để chuyển có kiểm soát, cần Như và Head of Engineering duyệt trước khi bot đọc dữ liệu production.
 
+> **Đã làm trong code (14/11/2026), chưa dùng với dữ liệu thật:** allowlist SQL và proxy DB, bộ che mạnh hơn và ngưỡng chặn, chế độ shadow, che và xóa log, cấm đọc file bí mật, kiểm tra điều kiện khởi động. Mô tả ở README mục "Chạy trên PROD". **Còn phải làm bởi người (không có trong code):** tạo role và view đã che trên replica (`docs/prod-db-role.sql`), điền `config/db_allowlist.json`, danh tính bot thay token cá nhân, máy chủ chạy liên tục, ghi người duyệt vào `approvals`. Các ô dưới đây đánh dấu rõ cái nào đã có code.
+
 ## 1. Cái nào đã tách khỏi môi trường
 
 | Việc | Ở đâu | Khi sang PROD |
@@ -32,9 +34,10 @@ Chưa có con số nào ở trên được đo: hiện **chưa có case bug có 
 ## 3. Việc kỹ thuật phải làm trước khi chạm dữ liệu PROD
 
 **Dữ liệu cá nhân (rủi ro lớn nhất).** Staging không có khách thật, PROD có.
-- [ ] DBHub PROD dùng tài khoản **read-only trên replica**, và chỉ thấy các bảng/cột đã duyệt (view đã bỏ SĐT, địa chỉ, CCCD, ngân hàng) thay vì cả schema. `max_rows`/`query_timeout` chỉ giới hạn khối lượng, không che dữ liệu.
-- [ ] Bật `"redact_logs": true`: `logs/*.jsonl` lưu kết quả tool nguyên văn. Quyết định thời hạn lưu và nơi lưu (thư mục cục bộ không phù hợp cho PROD).
-- [ ] `sanitize()` (bộ che SĐT/email/CCCD/token) chỉ chạy trên câu trả lời và ghi chú. Rà lại với mẫu dữ liệu PROD thật (tên, địa chỉ, tài khoản ngân hàng chưa được che).
+- [ ] **(người làm)** DBHub PROD dùng tài khoản **read-only trên replica**, và chỉ thấy các bảng/cột đã duyệt (view đã bỏ SĐT, địa chỉ, CCCD, ngân hàng) thay vì cả schema: chạy `docs/prod-db-role.sql`. `max_rows`/`query_timeout` chỉ giới hạn khối lượng, không che dữ liệu.
+- [x] **(đã có code)** Lớp thứ hai: `config/db_allowlist.json` + `sqlguard.py` + `tools/dbhub_guard_mcp.py`; PROD không khởi động nếu thiếu. **Dev BE điền allowlist** (bảng và cột bot cần để xử lý ticket).
+- [x] **(đã có code)** Che `logs/*.jsonl` luôn bật trên PROD (kể cả khi lượt chạy lỗi) và xóa sau `log_retention_days` (1–30). **Người quyết định:** nơi lưu và thời hạn (thư mục cục bộ không phù hợp cho PROD): ghi vào `approvals.log_policy`.
+- [x] **(đã có code, vẫn là lớp phụ)** `sanitize()` che thêm số điện thoại có dấu phân cách, tài khoản ngân hàng, thẻ (Luhn), IBAN, URL kèm mật khẩu, khóa AWS/GitHub/Slack, khóa riêng; áp dụng cho trả lời, AI Note, mọi cột ghi vào Base và tiêu đề; trả lời cần che quá `max_masked` mục thì không đăng. Vẫn chưa che tên và địa chỉ: rà lại với mẫu dữ liệu PROD thật, và dựa vào view ở trên.
 - [ ] Case/fixture lấy từ ticket thật phải ẩn danh (mã đơn, tài khoản, SĐT) trước khi commit.
 
 **Đúng phiên bản code.** `file:dòng` sai phiên bản trông vẫn hợp lý, nguy hiểm hơn là không có.
@@ -56,7 +59,7 @@ Chưa có con số nào ở trên được đo: hiện **chưa có case bug có 
 ## 4. Lộ trình chuyển (đề xuất)
 
 1. **Hoàn thiện trên staging:** đạt tiêu chí mục 2.
-2. **Chế độ bóng:** bot đọc ticket DCS thật nhưng chỉ ghi vào sandbox; người trực vẫn làm như cũ. So kết luận của bot với kết quả thật trong ≥ 2 tuần, ghi lại sai/đúng. *Chưa có trong code*: hiện bot đọc ticket từ chính Base sandbox. Cần thêm cấu hình nguồn ticket tách khỏi đích ghi, và giữ `lark_write()` khóa vào sandbox.
+2. **Chế độ bóng:** bot đọc ticket DCS thật nhưng chỉ ghi vào sandbox; người trực vẫn làm như cũ. So kết luận của bot với kết quả thật trong ≥ 2 tuần, ghi lại sai/đúng. *Đã có trong code* (`ticket_source.mode = "shadow"`, `lark_write()` vẫn khóa vào sandbox), **chưa thử với Lark thật**: cần xác nhận tên cột `Date Created` và cú pháp `--sort-json` trên Base DCS, và id bảng ticket (điền `tickets_table` trong `config.prod.json`).
 3. **Trả lời thật cho 1–2 Product** có người trực theo dõi và nút "bot sai" để đo.
 4. Mở rộng dần; bất kỳ lần đổi `gate`/`RULES.md` đều chạy lại eval.
 

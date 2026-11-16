@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Offline self-check for bot.py pure logic (no Lark / Claude calls). Run: python3 tests/test_bot.py"""
-import sys
+import json, sys
 from datetime import datetime
 from pathlib import Path
 
@@ -242,3 +242,24 @@ assert 'eyJ' not in m and 'Bearer ***' in m, m
 # error-tracker filters come from config env, not from our environment name (Biz staging = Bugsnag 'development')
 assert bot.render('{BUGSNAG_STAGE}') == bot.ENV.get('bugsnag_release_stage', bot.ENV['name'])
 print('ok jwt mask + tracker env')
+
+# staging (the default config) is unchanged by the production guards: DBHub directly, no shadow, logs kept as before
+assert not bot.IS_PROD and not bot.SHADOW and bot.REDACT_LOGS is False and bot.LOG_RETENTION_DAYS == 0
+_args = json.loads(bot.mcp_config())['mcpServers']['dbhub']['args']
+assert any(a.endswith('dbhub-stg.py') for a in _args) and not any('guard' in a for a in _args), _args
+assert bot.guard.preflight(bot.CFG, bot.ROOT) == []
+print('ok staging unchanged')
+
+# the deny list for files the scanner found never loses a file: too many paths collapse into folders, special characters are escaped
+files = [f'svc/dir{i}/secret{i}.txt' for i in range(10)] + ['web/app/[id]/page.tsx', 'web/(auth)/key.js']
+assert bot.collapse_paths(files, 100)[-2:] == ['web/app/\\[id\\]/page.tsx', 'web/\\(auth\\)/key.js']
+few = bot.collapse_paths(files, 5)
+assert len(few) <= 5 and all(p.endswith('/**') for p in few), few
+assert any(p.startswith('svc/') for p in few) and any(p.startswith('web/') for p in few)
+assert bot.collapse_paths(['a/b/c.txt', 'a/d/e.txt', 'a/f/g.txt'], 1) == ['a/**']
+try:
+    bot.collapse_paths(['a/x', 'b/y'], 1)
+    raise AssertionError('must refuse when it cannot reduce further')
+except RuntimeError:
+    pass
+print('ok collapse_paths')

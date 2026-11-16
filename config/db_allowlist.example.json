@@ -1,0 +1,19 @@
+{
+  "_comment": "MẪU ĐỊNH DẠNG. Sao chép thành config/db_allowlist.json (git bỏ qua) rồi Dev BE điền theo view đã che dữ liệu thật. Tên bảng và cột dưới đây chỉ minh họa. Mỗi source = một DB replica; bot chỉ thấy đúng các bảng và cột liệt kê ở đây. Tên bảng/cột viết thường, dạng lower_snake_case. Cột trông như dữ liệu cá nhân (phone, email, address, bank, token, họ tên...) bị từ chối khi nạp file, trừ khi ghi rõ vào allow_sensitive dạng \"source.table.column\" sau khi Dev BE và bảo mật duyệt. Không đưa cột JSON vào (JSON có thể chứa dữ liệu cá nhân).",
+  "allow_sensitive": [],
+  "sources": {
+    "prod_order": {
+      "database": "REPLACE_order_service_replica_db",
+      "tables": {
+        "orders": ["id", "code", "status", "created_at", "updated_at", "total_amount", "shipping_fee", "voucher_code"],
+        "order_items": ["id", "order_id", "sku", "quantity", "unit_price"]
+      }
+    },
+    "prod_promotion": {
+      "database": "REPLACE_promotion_service_replica_db",
+      "tables": {
+        "vouchers": ["id", "code", "status", "starts_at", "ends_at", "min_order_value", "discount_value"]
+      }
+    }
+  }
+}

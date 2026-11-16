@@ -1,0 +1,43 @@
+{
+  "extends": "config.json",
+  "note": "CHẠY PROD (chế độ bóng): sao chép thành config.prod.json (git bỏ qua), điền các mục CONFIRM/REPLACE/approvals, rồi `DCS_CONFIG=config.prod.json python bot.py`. Chỉ ghi các khác biệt so với config.json. bot.py từ chối chạy (preflight) nếu thiếu cài đặt an toàn hoặc chưa ghi người duyệt trong approvals. Danh sách repo (knowledge) kế thừa từ config.json: nhánh `branch` phải là bản đang chạy Prod, đặt trong config.json hoặc ghi đè cả danh sách ở đây.",
+  "env": {
+    "name": "production",
+    "label": "[PROD-SHADOW]",
+    "nr_prefix": "vn-prod-",
+    "db_prefix": "prod_",
+    "code_branch": "main",
+    "data_note": "theo dữ liệu production",
+    "bugsnag_release_stage": "production",
+    "sentry_environment": "production"
+  },
+  "ticket_source": {
+    "mode": "shadow",
+    "base_token": "UMiebZAFMahsj2s54uhlz3Ojgeh",
+    "tickets_table": "REPLACE_WITH_DCS_TICKETS_TABLE_ID",
+    "since": "",
+    "window": 100,
+    "max_new_per_tick": 2,
+    "state_file": "data/shadow_state.json"
+  },
+  "redact_logs": true,
+  "log_retention_days": 14,
+  "output_guard": {
+    "max_masked": 3
+  },
+  "db_guard": {
+    "enabled": true,
+    "allowlist": "config/db_allowlist.json",
+    "upstream": "tools/dbhub-prod.py"
+  },
+  "lark_identity": {
+    "read": "user",
+    "write": "user"
+  },
+  "approvals": {
+    "data_scope": "",
+    "log_policy": "",
+    "model_provider": "",
+    "code_version": ""
+  }
+}

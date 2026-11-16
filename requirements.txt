@@ -1,0 +1,4 @@
+# Python dependencies (everything else in this repo uses the standard library).
+# sqlglot: SQL parser behind sqlguard.py, the allowlist check on every query to a production database. Pinned on purpose.
+# Install into the interpreter that runs the bot (not `pip install --user`: the MCP tools start with `python -I`, which ignores user site-packages).
+sqlglot==27.29.0

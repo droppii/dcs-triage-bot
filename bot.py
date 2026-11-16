@@ -14,15 +14,17 @@ import argparse, getpass, hashlib, json, os, re, subprocess, sys, threading, tim
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import guard
 import priorart
 import rca
 import usage
+from guard import sanitize
 
 ROOT = Path(__file__).resolve().parent
 LOGS = ROOT / 'logs'
 KNOWLEDGE_DIR = ROOT / 'knowledge'
 TZ = timezone(timedelta(hours=7))
-CFG = json.loads(Path(os.environ.get('DCS_CONFIG', ROOT / 'config.json')).read_text(encoding='utf-8'))
+CFG = guard.load_config(os.environ.get('DCS_CONFIG', ROOT / 'config.json'))   # may "extends" another file (config.prod.example.json)
 
 
 def load_dotenv(path=ROOT / '.env'):
@@ -55,6 +57,16 @@ VERIFIER = CFG.get('verifier', {})
 ATTACH = CFG.get('attachments', {})
 PRIOR = CFG.get('prior_art', {})
 USAGE = {'ledger': True, 'field': '', **CFG.get('usage', {})}
+IS_PROD = guard.is_prod(CFG)
+REDACT_LOGS = bool(CFG.get('redact_logs')) or IS_PROD     # production logs are always masked (preflight also refuses an explicit false)
+OUT_GUARD = {'max_masked': 5, **CFG.get('output_guard', {})}  # a reply that needed more masks than this is withheld
+LOG_RETENTION_DAYS = int(CFG.get('log_retention_days') or 0)  # 0 = keep (staging); production requires 1..30 (guard.preflight)
+SOURCE = {'mode': 'sandbox', **CFG.get('ticket_source', {})}  # sandbox: tickets and results both in the sandbox Base
+SHADOW = SOURCE['mode'] == 'shadow'                           # shadow: READ real tickets, write results only to sandbox chat + local state
+LARK_IDS = {'read': 'user', 'write': 'user', **CFG.get('lark_identity', {})}  # move to 'bot' once the bot app can read/write there
+READ_AS, WRITE_AS = LARK_IDS['read'], LARK_IDS['write']
+STATE_FILE = ROOT / SOURCE.get('state_file', 'data/shadow_state.json')
+BOT_COLUMNS = ('Bot Status', 'Bot Thread')                    # exist only in the sandbox Base, never in the real DCS Base
 
 TYPE_LABEL = {'A': 'A - Tra cứu', 'B': 'B - Cách dùng/Đúng thiết kế', 'C': 'C - Bug', 'D': 'D - Chỉnh dữ liệu',
               'E': 'E - Đề xuất', '?': '? - Không chắc'}
@@ -98,6 +110,40 @@ READ_TOOLS = (
         'get_distributed_trace_details analyze_transactions analyze_golden_metrics list_change_events '
         'list_recent_issues search_incident convert_time_period_to_epoch_ms').split()]
 )
+
+
+def secret_deny():
+    """Read/Grep deny rules for files that hold credentials inside the code clones: well-known names (guard.SECRET_FILE_GLOBS) plus every
+    file tools/scan_secrets.py found a secret in (data/secret_files.txt, paths relative to knowledge/). Kept short: the whole
+    command line must stay under the Windows limit (checked in run_claude)."""
+    base = perm_path(KNOWLEDGE_DIR)
+    pats = [f'{base}/**/{g}' for g in guard.SECRET_FILE_GLOBS]
+    pats += [f'{base}/{rel}' for rel in collapse_paths(listed_secret_files(), MAX_LISTED_DENY)]
+    return [f'{tool}({p})' for tool in ('Read', 'Grep') for p in pats]
+
+
+MAX_LISTED_DENY = 60
+
+
+def listed_secret_files():
+    f = ROOT / 'data' / 'secret_files.txt'
+    return [ln.strip() for ln in f.read_text(encoding='utf-8').splitlines() if ln.strip()] if f.exists() else []
+
+
+def collapse_paths(files, limit):
+    """Deny rules for the files the scanner found. Too many for the command line: deny whole folders instead (fail closed, never
+    leave a listed file readable). Glob and rule characters in a path ([id].tsx, (auth)/) are escaped so the rule matches it."""
+    def parent(p):                                   # a/b/f -> a/b/**   a/b/** -> a/**   a/** -> a/** (cannot climb further)
+        base = p[:-3] if p.endswith('/**') else p
+        return base.rsplit('/', 1)[0] + '/**' if '/' in base else p
+
+    paths = list(dict.fromkeys(f.replace('\\', '/') for f in files))
+    while len(paths) > limit:
+        parents = list(dict.fromkeys(parent(p) for p in paths))
+        if parents == paths:
+            raise RuntimeError(f'{len(paths)} secret paths cannot be reduced to {limit} deny rules: clean the repos and rotate the secrets')
+        paths = parents
+    return [re.sub(r'([\[\]()?])', r'\\\1', p) for p in paths]
 
 
 # ---------- lark-cli ----------
@@ -159,23 +205,75 @@ def text_of(v):
     return str(v)
 
 
-# ---------- sandbox data ----------
+# ---------- ticket source and results ----------
 
 def sandbox_tickets():
-    args = ['base', '+record-list', '--base-token', SANDBOX_BASE, '--table-id', SANDBOX_TICKETS, '--as', 'user',
+    args = ['base', '+record-list', '--base-token', SANDBOX_BASE, '--table-id', SANDBOX_TICKETS, '--as', READ_AS,
             '--format', 'json', '--limit', '200']
     for f in TICKET_FIELDS:
         args += ['--field-id', f]
     return rows_to_dicts(lark(*args))
 
 
+def load_state():
+    """Shadow mode keeps the bot's own columns (Bot Status, Bot Thread, AI Note...) here, because the real DCS Base must stay untouched.
+    `since` is set on first use to NOW: a lost state file means skipping old tickets, never re-triaging the whole history."""
+    try:
+        st = json.loads(STATE_FILE.read_text(encoding='utf-8'))
+        if st.get('since') and isinstance(st.get('tickets'), dict):
+            return st
+    except FileNotFoundError:
+        pass
+    except (OSError, ValueError):
+        print(f'WARNING: shadow state {STATE_FILE} is unreadable: starting from now, tickets in flight are not resumed', file=sys.stderr)
+    st = {'since': SOURCE.get('since') or datetime.now(TZ).isoformat(), 'tickets': {}}
+    save_state(st)
+    return st
+
+
+def save_state(st):
+    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = STATE_FILE.with_suffix('.tmp')
+    tmp.write_text(json.dumps(st, ensure_ascii=False, indent=1), encoding='utf-8')
+    tmp.replace(STATE_FILE)                                    # atomic: a crash never leaves half a file
+
+
+def shadow_tickets():
+    """Tickets of the real DCS Base (read only) created since the shadow run started, oldest first, with the bot's state from
+    the local file in place of the Bot columns."""
+    st = load_state()
+    since = datetime.fromisoformat(st['since'])
+    if since.tzinfo is None:                                   # a date typed in config without an offset means Vietnam time
+        since = since.replace(tzinfo=TZ)
+    args = ['base', '+record-list', '--base-token', SOURCE['base_token'], '--table-id', SOURCE['tickets_table'], '--as', READ_AS,
+            '--format', 'json', '--limit', str(SOURCE.get('window', 100)), '--sort-json', '[{"field":"Date Created","desc":true}]']
+    for f in TICKET_FIELDS:
+        if f not in BOT_COLUMNS:
+            args += ['--field-id', f]
+    unknown = datetime.min.replace(tzinfo=TZ)                  # an unreadable date is treated as old: skipped, never triaged by accident
+    rows = [r for r in rows_to_dicts(lark(*args)) if created_at(r, unknown) >= since]
+    for r in rows:
+        r.update({k: v for k, v in st['tickets'].get(r['record_id'], {}).items() if k in BOT_COLUMNS})
+    return sorted(rows, key=lambda r: created_at(r, unknown))
+
+
+def source_tickets():
+    return shadow_tickets() if SHADOW else sandbox_tickets()
+
+
 def update_ticket(record_id, fields):
+    """Write the bot columns. Everything is masked first: a ticket field can end up in a Base view anyone may open."""
+    fields = {k: (v if k == 'Bot Thread' else guard.sanitize(v) if isinstance(v, str) else v) for k, v in fields.items()}
+    if SHADOW:                                                 # never touches the real Base
+        st = load_state()
+        st['tickets'].setdefault(record_id, {}).update(fields)
+        return save_state(st)
     lark_write('base', '+record-batch-update', '--base-token', SANDBOX_BASE, '--table-id', SANDBOX_TICKETS,
-               '--as', 'user', '--json', json.dumps({'update_records': {record_id: fields}}, ensure_ascii=False))
+               '--as', WRITE_AS, '--json', json.dumps({'update_records': {record_id: fields}}, ensure_ascii=False))
 
 
 def chat_messages(limit=50):
-    data = lark('im', '+chat-messages-list', '--chat-id', SANDBOX_CHAT, '--as', 'user', '--page-size', str(limit),
+    data = lark('im', '+chat-messages-list', '--chat-id', SANDBOX_CHAT, '--as', READ_AS, '--page-size', str(limit),
                 '--no-reactions')
     msgs = data.get('items') or data.get('messages') or []
     _sandbox_message_ids.update(m['message_id'] for m in msgs)
@@ -191,15 +289,17 @@ def find_card(code):
 
 
 def thread_messages(root_id):
-    data = lark('im', '+threads-messages-list', '--thread', root_id, '--as', 'user', '--no-reactions')
+    data = lark('im', '+threads-messages-list', '--thread', root_id, '--as', READ_AS, '--no-reactions')
     msgs = data.get('items') or data.get('messages') or []
     _sandbox_message_ids.update(m['message_id'] for m in msgs)
     return msgs
 
 
 def post_root(ticket):
-    text = (f"**{LABEL} {text_of(ticket['Code'])} - {text_of(ticket['Product'])} - {text_of(ticket['Priority'])} - "
-            f"{text_of(ticket['Title'])}**\n(Bot tự đăng vì không thấy thẻ của automation sau 3 phút)")
+    why = ('Chế độ bóng: bot đọc ticket thật, chỉ đăng kết quả ở đây, không trả lời trong group DCS' if SHADOW
+           else 'Bot tự đăng vì không thấy thẻ của automation sau 3 phút')
+    text = guard.sanitize(f"**{LABEL} {text_of(ticket['Code'])} - {text_of(ticket['Product'])} - {text_of(ticket['Priority'])} - "
+                          f"{text_of(ticket['Title'])}**\n({why})")
     mid = lark_write('im', '+messages-send', '--as', 'bot', '--chat-id', SANDBOX_CHAT, '--markdown', text)['message_id']
     _sandbox_message_ids.add(mid)
     return mid
@@ -217,7 +317,7 @@ def reply(root_id, markdown, key=None):
 
 def oncall(product, now=None):
     """(Person names, BA-QA names) on duty for a product, from the prod Schedule table (read-only)."""
-    data = lark('base', '+record-list', '--base-token', PROD_BASE, '--table-id', PROD_SCHEDULE, '--as', 'user',
+    data = lark('base', '+record-list', '--base-token', PROD_BASE, '--table-id', PROD_SCHEDULE, '--as', READ_AS,
                 '--format', 'json', '--limit', '200', '--sort-json', '[{"field":"FromDate","desc":true}]')
     return pick_oncall(rows_to_dicts(data), product, now or datetime.now(TZ))
 
@@ -237,6 +337,18 @@ def pick_oncall(rows, product, now):
 
 # ---------- brain ----------
 
+def dbhub_server():
+    """Staging: DBHub directly. Production (or db_guard.enabled): always through tools/dbhub_guard_mcp.py, which checks every SQL
+    against config/db_allowlist.json and starts the matching DBHub (tools/dbhub-prod.py) itself."""
+    g = CFG.get('db_guard') or {}
+    if IS_PROD or g.get('enabled'):
+        allow = ROOT / g.get('allowlist', 'config/db_allowlist.json')
+        upstream = ROOT / g.get('upstream', 'tools/dbhub-prod.py' if IS_PROD else 'tools/dbhub-stg.py')
+        return {'type': 'stdio', 'command': sys.executable,
+                'args': ['-I', str(ROOT / 'tools/dbhub_guard_mcp.py'), '--allowlist', str(allow), '--upstream', str(upstream)]}
+    return {'type': 'stdio', 'command': sys.executable, 'args': ['-I', str(ROOT / 'tools/dbhub-stg.py')]}
+
+
 def mcp_config(servers=None):
     """MCP servers for the brain (only `servers` if given). HTTP ones use the runner's own OAuth login (claude /mcp); dbhub is local
     + readonly. Every server's tool definitions are re-read on EVERY turn (Sentry alone is ~86k tokens), so a run gets only the
@@ -245,7 +357,7 @@ def mcp_config(servers=None):
         'sentry': {'type': 'http', 'url': 'https://mcp.sentry.dev/mcp'},
         'bugsnag': {'type': 'http', 'url': 'https://bugsnag.mcp.smartbear.com/mcp'},
         'newrelic': {'type': 'http', 'url': 'https://mcp.newrelic.com/mcp/'},
-        'dbhub': {'type': 'stdio', 'command': sys.executable, 'args': ['-I', str(ROOT / 'tools/dbhub-stg.py')]},
+        'dbhub': dbhub_server(),
         'repogit': {'type': 'stdio', 'command': sys.executable,
                     'args': ['-I', str(ROOT / 'tools/repo_git_mcp.py'), '--root', str(KNOWLEDGE_DIR)]},
     }
@@ -407,17 +519,23 @@ def run_claude(prompt, system, schema_file, label, model=None, role='brain', ser
     extra = ['--append-system-prompt-file', str(rules_file), '--json-schema', schema]
     if MAX_BUDGET:
         extra += ['--max-budget-usd', str(MAX_BUDGET)]
-    denied = denied_tools(servers) if servers else []
+    denied = (denied_tools(servers) if servers else []) + secret_deny()
     if denied:
         extra += ['--disallowedTools', *denied]                    # variadic too, so it also stays before --allowedTools
     cmd[i:i] = extra
     LOGS.mkdir(exist_ok=True)
     log = LOGS / f'{stamp}.jsonl'
+    if len(subprocess.list2cmdline(cmd)) > 30000:                 # Windows CreateProcess stops at 32,767: fail loudly, not as a mystery
+        raise RuntimeError('claude command line too long: shorten READ_DIRS, the MCP tool list or data/secret_files.txt')
     try:
         with open(log, 'w', encoding='utf-8') as f:
             subprocess.run(cmd, input=prompt, text=True, encoding='utf-8', cwd=ROOT / 'agent', stdout=f, stderr=subprocess.STDOUT,
                            timeout=CLAUDE_TIMEOUT,
                            env={**os.environ, 'USER': os.environ.get('USER') or getpass.getuser()})  # launchd: claude needs USER
+    except BaseException:
+        if REDACT_LOGS:
+            redact_log(log)
+        raise
     finally:
         for tmp in (rules_file, mcp_file):
             tmp.unlink(missing_ok=True)
@@ -475,11 +593,15 @@ def run_verifier(out, label):
         log = run_claude(prompt, rules('agent/VERIFIER.md'), 'agent/verifier_schema.json', f'{label}-verify',
                          VERIFIER.get('model') or MODEL, role='verifier',
                          servers=[x for x in ('newrelic', 'repogit') if x in json.loads(mcp_config())['mcpServers']])
-        res, _ = structured_result(log)
-        v = res['structured_output']
-        v['_cost'] = res.get('total_cost_usd')
-        v['_usage'] = usage.extract(res)
-        return v
+        try:
+            res, _ = structured_result(log)
+            v = res['structured_output']
+            v['_cost'] = res.get('total_cost_usd')
+            v['_usage'] = usage.extract(res)
+            return v
+        finally:
+            if REDACT_LOGS:
+                redact_log(log)
     except Exception as e:  # a verifier that could not run is not a pass
         return {'verdict': 'FAIL', 'holes': [f'verifier không chạy được: {str(e)[:150]}'], 'alternatives_checked': [],
                 '_cost': 0, '_usage': usage.empty()}
@@ -491,8 +613,9 @@ def fetch_attachments(t):
         return []
     d = ATTACH_DIR / re.sub(r'[^\w.-]', '_', text_of(t.get('Code')) or t['record_id'])
     d.mkdir(parents=True, exist_ok=True)
-    lark('base', '+record-download-attachment', '--base-token', SANDBOX_BASE, '--table-id', SANDBOX_TICKETS,
-         '--record-id', t['record_id'], '--as', 'user', '--output', str(d), '--overwrite')
+    src = (SOURCE['base_token'], SOURCE['tickets_table']) if SHADOW else (SANDBOX_BASE, SANDBOX_TICKETS)
+    lark('base', '+record-download-attachment', '--base-token', src[0], '--table-id', src[1],
+         '--record-id', t['record_id'], '--as', READ_AS, '--output', str(d), '--overwrite')
     limit = int(ATTACH.get('max_mb', 5)) * 1024 * 1024
     files = [f for f in sorted(d.rglob('*')) if f.is_file() and f.suffix.lower() in ('.png', '.jpg', '.jpeg', '.webp', '.gif')
              and f.stat().st_size <= limit]
@@ -504,7 +627,7 @@ def prior_tickets(ticket):
     if not PRIOR.get('enabled'):
         return []
     rows = rows_to_dicts(lark('base', '+record-list', '--base-token', PRIOR['base_token'], '--table-id', PRIOR['table_id'],
-                              '--as', 'user', '--format', 'json', '--limit', str(PRIOR.get('limit', 300))))
+                              '--as', READ_AS, '--format', 'json', '--limit', str(PRIOR.get('limit', 300))))
     return priorart.similar(ticket, rows, PRIOR['fields'], set(PRIOR.get('closed_statuses', [])), PRIOR.get('top_k', 3))
 
 
@@ -528,15 +651,17 @@ def run_brain(ticket, thread_text='', label='dry', attachments=(), prior=()):
                    + json.dumps([{k: sanitize(str(v)) for k, v in p.items()} for p in prior], ensure_ascii=False, indent=1)
                    + '\n</prior_tickets>')
     log = run_claude(prompt, rules(), 'agent/schema.json', label, servers=product_servers(ticket.get('Product')))
-    out = finalize_log(log, versions)
-    if (VERIFIER.get('enabled') and out['type'] == 'C' and rca.gated(out, GATE)
-            and not rca.gate_failures(out, GATE)):  # only a would-be conclusion is worth a second look
-        out['verifier'] = run_verifier(out, label)
-        out['_usage_parts'] = {'brain': out['_usage'], 'verifier': out['verifier']['_usage']}
-        out['_usage'] = usage.merge(*out['_usage_parts'].values())
-        out['_cost'] = (out['_cost'] or 0) + (out['verifier'].get('_cost') or 0)
-    if CFG.get('redact_logs'):
-        redact_log(log)
+    try:
+        out = finalize_log(log, versions)   # verifies quotes against the RAW transcript, so masking comes after
+        if (VERIFIER.get('enabled') and out['type'] == 'C' and rca.gated(out, GATE)
+                and not rca.gate_failures(out, GATE)):  # only a would-be conclusion is worth a second look
+            out['verifier'] = run_verifier(out, label)
+            out['_usage_parts'] = {'brain': out['_usage'], 'verifier': out['verifier']['_usage']}
+            out['_usage'] = usage.merge(*out['_usage_parts'].values())
+            out['_cost'] = (out['_cost'] or 0) + (out['verifier'].get('_cost') or 0)
+    finally:
+        if REDACT_LOGS:
+            redact_log(log)
     return out
 
 
@@ -553,22 +678,17 @@ def redact_log(log):
 
 # ---------- output safety ----------
 
-_MASKS = [
-    (re.compile(r'postgres(?:ql)?://\S+', re.I), 'postgres://***'),
-    # Bugsnag/Sentry payloads carry request headers: bearer tokens and JWTs must never reach a reply or a log
-    (re.compile(r'(?i)\bbearer\s+\S+'), 'Bearer ***'),
-    (re.compile(r'\beyJ[\w-]{8,}\.[\w-]+\.[\w-]+'), '***JWT***'),
-    (re.compile(r'(?i)\b(password|passwd|pwd|secret|token|api[_-]?key)\b(\s*[:=]\s*)\S+'), r'\1\2***'),
-    (re.compile(r'(?<![\w.])[\w.+-]+@[\w-]+\.[\w.-]+'), '***@***'),
-    (re.compile(r'(?<!\d)(?:\+?84|0)[35789]\d{8}(?!\d)'), '***SĐT***'),
-    (re.compile(r'(?i)((?:cccd|cmnd|căn cước)\D{0,5})\d{9,12}'), r'\1***'),
-]
+_mask_hits = [0]
 
 
-def sanitize(text):
-    for rx, rep in _MASKS:
-        text = rx.sub(rep, text)
+def sanitize_tracked(text):
+    """sanitize() that also counts its masks. compose_reply masks pieces while it builds the reply (it must, before cutting them
+    to length), so finish() adds this counter to the masks of the final pass: otherwise those hits would not count."""
+    text, n = guard.sanitize_counted(text)
+    _mask_hits[0] += n
     return text
+
+# sanitize() and its masks live in guard.py (imported above); finish() withholds a reply that needed too many masks.
 
 
 CHECKS = (('source_be', 'Code BE'), ('db', 'DB'), ('newrelic', 'New Relic'))
@@ -636,7 +756,7 @@ def compose_reply(out, ticket, person, baqa):
         lines += ['', '**ĐÃ KIỂM TRA:**']
         for k, name in CHECKS:
             ev = out['evidence'][k]
-            detail = rca.shorten_paths(sanitize(str(ev.get('detail') or '')).replace('*', ''))[:200]
+            detail = rca.shorten_paths(sanitize_tracked(str(ev.get('detail') or '')).replace('*', ''))[:200]
             lines.append(f"- **{name}:** `{MARK[ev['status']]}`" + (f" — *{detail}*" if detail else ''))
         if out['type'] == 'C':
             lines += [f"- **{rca.CHECK_LABEL[n][:1].upper() + rca.CHECK_LABEL[n][1:]}:** `{'✓' if rca.check_ok(out, n) else '✗'}`"
@@ -684,11 +804,23 @@ def extras(t):
 
 def finish(t, root, out):
     person, baqa = oncall(text_of(t.get('Product')))
-    reply(root, compose_reply(out, t, person, baqa), key=f"{text_of(t['Code'])}-{out['_log']}")
+    _mask_hits[0] = 0
+    text, masks = guard.sanitize_counted(compose_reply(out, t, person, baqa))
+    masks += _mask_hits[0]
+    withheld = guard.leak_blocked(masks, OUT_GUARD['max_masked'])
+    if withheld:  # many personal-data / secret hits in one reply: the model is dumping data (or was told to). Say nothing of it.
+        print(f"{text_of(t['Code'])}: REPLY WITHHELD, {masks} masked items (log {out['_log']})", file=sys.stderr)
+        text = (f'{LABEL} Bot không đăng kết quả vì phát hiện nhiều dữ liệu cá nhân hoặc bí mật trong nội dung ({masks} chỗ). '
+                'Người trực xử lý theo cách thường.' + (f' **Giao cho:** {person}' if person else ''))
+    reply(root, text, key=f"{text_of(t['Code'])}-{out['_log']}")
     out['_code'] = text_of(t['Code'])
     eff = verdict(out)
-    status = 'Chờ người báo' if out['missing_info'] else ('Đã trả lời' if eff in ('A', 'B') else 'Đã chuyển người')
-    update_ticket(t['record_id'], bot_fields(out, status))
+    status = 'Chờ người báo' if out['missing_info'] and not withheld else ('Đã trả lời' if eff in ('A', 'B') and not withheld
+                                                                           else 'Đã chuyển người')
+    fields = bot_fields(out, status)
+    if withheld:
+        fields.update({'AI Type': [TYPE_LABEL['?']], 'AI Note': f"Bot không đăng kết quả: {masks} mục dữ liệu nhạy cảm bị che (log {out['_log']})"})
+    update_ticket(t['record_id'], fields)
     print(f"{text_of(t['Code'])}: nghi {out['type']} -> {eff} {[out['evidence'][k]['status'] for k, _ in CHECKS]} "
           f"-> {status} ({usage.note(out['_usage'], out.get('_usage_parts'))})")
 
@@ -697,24 +829,38 @@ def created_at(t, now):
     """System 'Date Created' (ISO string or epoch ms); unknown -> now, so the bot still waits for the card."""
     v = t.get('Date Created')
     try:
-        return datetime.fromtimestamp(int(v) / 1000, TZ) if str(v).isdigit() else datetime.fromisoformat(v)
+        d = datetime.fromtimestamp(int(v) / 1000, TZ) if str(v).isdigit() else datetime.fromisoformat(v)
+        return d if d.tzinfo else d.replace(tzinfo=TZ)   # '2026-11-16 10:00:00' carries no offset: Vietnam time, and comparable
     except (TypeError, ValueError):
         return now
 
 
 def handle_new(t, now):
+    """Start triage of a new ticket. True once it was taken (so tick() can count it), False if it must wait."""
     code = text_of(t['Code'])
-    root = find_card(code)
-    if not root:
-        if now - created_at(t, now) < CARD_WAIT:
-            return  # give the automation time to post its card
-        root = post_root(t)
-    update_ticket(t['record_id'], {'Bot Status': ['Đang xử lý'], 'Bot Thread': root})
+    if SHADOW:  # no automation card exists in the sandbox group for a real ticket: mark it taken first (a crash then leaves it
+        # stuck, never triaged twice), then open the thread
+        update_ticket(t['record_id'], {'Bot Status': ['Đang xử lý']})
+        try:
+            root = post_root(t)
+        except Exception as e:
+            print(f'{code}: cannot open the shadow thread: {e}', file=sys.stderr)
+            update_ticket(t['record_id'], {'Bot Status': ['Lỗi bot'], 'AI Note': error_note(code, e)})
+            return True
+        update_ticket(t['record_id'], {'Bot Thread': root})
+    else:
+        root = find_card(code)
+        if not root:
+            if now - created_at(t, now) < CARD_WAIT:
+                return False  # give the automation time to post its card
+            root = post_root(t)
+        update_ticket(t['record_id'], {'Bot Status': ['Đang xử lý'], 'Bot Thread': root})
     try:
         reply(root, f'{LABEL} Bot đang kiểm tra ticket này, sẽ trả lời trong vài phút.', key=f'{code}-ack')
         finish(t, root, run_brain(brain_view(t), label=code, **extras(t)))
     except Exception as e:
         fail(t, root, e)
+    return True
 
 
 def error_note(code, e):
@@ -758,12 +904,33 @@ def handle_waiting(t):
         fail(t, root, e)
 
 
+_last_purge = [0.0]
+
+
+def housekeeping():
+    """Retention: transcripts (tool results = real data) and downloaded ticket images are deleted after log_retention_days.
+    Hourly at most. usage.jsonl holds only token counts and stays."""
+    if not LOG_RETENTION_DAYS or time.time() - _last_purge[0] < 3600:
+        return
+    _last_purge[0] = time.time()
+    n = guard.purge_old(LOGS, LOG_RETENTION_DAYS, '*-????????-??????.jsonl')           # run transcripts
+    n += guard.purge_old(LOGS, LOG_RETENTION_DAYS, 'db-audit-????????.jsonl')           # one file per day (masked SQL shapes)
+    n += sum(guard.purge_old(d, LOG_RETENTION_DAYS, '*') for d in [ATTACH_DIR, *ATTACH_DIR.glob('*')] if d.is_dir())
+    if n:
+        print(f'housekeeping: removed {n} files older than {LOG_RETENTION_DAYS} days')
+
+
 def tick():
     now = datetime.now(TZ)
-    for t in sandbox_tickets():
+    housekeeping()
+    cap = int(SOURCE.get('max_new_per_tick', 3)) if SHADOW else None   # shadow: bounds cost and blast radius per minute
+    started = 0
+    for t in source_tickets():
         status = text_of(t.get('Bot Status'))
         if not status:
-            handle_new(t, now)
+            if cap is not None and started >= cap:
+                continue
+            started += bool(handle_new(t, now))
         elif status == 'Chờ người báo':
             handle_waiting(t)
 
@@ -773,6 +940,14 @@ def main():
     ap.add_argument('--once', action='store_true')
     ap.add_argument('--dry-ticket', help='ticket JSON file: run the brain only, write nothing')
     a = ap.parse_args()
+    for stream in (sys.stdout, sys.stderr):  # a Windows console (cp1252) cannot print "Đã trả lời": that would raise AFTER the reply
+        try:                                 # was sent and fail() would then overwrite the ticket status with "Lỗi bot"
+            stream.reconfigure(encoding='utf-8', errors='replace')
+        except (AttributeError, ValueError):
+            pass
+    problems = guard.preflight(CFG, ROOT)   # production refuses to run without its safety settings and approvals
+    if problems:
+        sys.exit('Production preflight failed, nothing was started:\n  - ' + '\n  - '.join(problems))
     if a.dry_ticket:
         doc = json.loads(Path(a.dry_ticket).read_text(encoding='utf-8'))
         ticket = doc.get('ticket', doc)  # cases/*.json wrap the ticket next to the expected outcome
