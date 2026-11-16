@@ -9,6 +9,9 @@ Run: python3 tools/repo_git_mcp.py --root knowledge
 import argparse, json, os, re, subprocess, sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))   # python -I does not put the script's directory on sys.path
+import guard
+
 MAX_OUT = 14000
 SAFE_PATH = re.compile(r'^[\w@+./ \-]{1,300}$')
 SAFE_DATE = re.compile(r'^[\w:+\-. ]{1,40}$')
@@ -53,6 +56,18 @@ def safe_path(p):
     if p and (not SAFE_PATH.match(p) or p.startswith(('/', '-')) or '..' in p.split('/')):
         raise ValueError('invalid path (relative path inside the repo, no "..")')
     return p
+
+
+def listed_secrets():
+    f = ROOT.parent / 'data' / 'secret_files.txt'              # written by tools/scan_secrets.py, paths relative to knowledge/
+    return [ln.strip() for ln in f.read_text(encoding='utf-8').splitlines() if ln.strip()] if f.exists() else []
+
+
+def not_secret(repo, path):
+    """Read/Grep are denied on credential files, so git (cat-file, blame, show) must not hand them out either."""
+    if path and guard.is_secret_path(f'{repo}/{path}', listed_secrets()):
+        raise ValueError('this file holds credentials and is not readable through this tool')
+    return path
 
 
 def safe_ref(r):
@@ -105,7 +120,7 @@ def call(name, a):
         rows = out.splitlines()[:n]
         return '\n'.join(rows) or '(no tags match; tags may not be in this clone: the clone only has recent history)'
     if name == 'git_file':
-        path, ref = safe_path(a.get('path')), safe_ref(a.get('ref'))
+        path, ref = not_secret(d.name, safe_path(a.get('path'))), safe_ref(a.get('ref'))
         s, e = int(a['line_start']), int(a['line_end'])
         if not path or not ref or not (1 <= s <= e <= s + 199):
             raise ValueError('need ref, path and 1 <= line_start <= line_end <= line_start+199')
@@ -114,7 +129,7 @@ def call(name, a):
             raise ValueError(f'file has only {len(text)} lines at {ref}')
         return clip('\n'.join(f'{i}: {l}' for i, l in enumerate(text[s - 1:e], s)))
     if name == 'git_blame':
-        path = safe_path(a.get('path'))
+        path = not_secret(d.name, safe_path(a.get('path')))
         s, e = int(a['line_start']), int(a['line_end'])
         if not (1 <= s <= e <= s + 199):
             raise ValueError('line range must satisfy 1 <= line_start <= line_end <= line_start+199')
@@ -124,8 +139,10 @@ def call(name, a):
         sha = str(a.get('sha', ''))
         if not SHA.match(sha):
             raise ValueError('invalid sha')
-        path = safe_path(a.get('path'))
-        return clip(git(d, 'show', '--stat', '--patch', '--format=%H%n%an | %ad%n%s%n%b', '--date=iso', sha, *(['--', path] if path else [])))
+        path = not_secret(d.name, safe_path(a.get('path')))
+        # a whole-commit diff must not print credential files either: exclude them by pathspec
+        scope = ['--', path] if path else ['--', '.', *guard.secret_pathspecs(d.name, listed_secrets())]
+        return clip(git(d, 'show', '--stat', '--patch', '--format=%H%n%an | %ad%n%s%n%b', '--date=iso', sha, *scope))
     raise ValueError(f'unknown tool {name}')
 
 

@@ -9,8 +9,10 @@ mkdir -p knowledge
 
 # name url branch since(YYYY-MM-DD) [sparse paths]
 python3 -I -c '
-import json, datetime
-for k in json.load(open("config.json", encoding="utf-8"))["knowledge"]:
+import datetime, os, sys
+sys.path.insert(0, ".")
+import guard
+for k in guard.load_config(os.environ.get("DCS_CONFIG", "config.json"))["knowledge"]:
     since = (datetime.date.today() - datetime.timedelta(days=int(k.get("history_days", 180)))).isoformat()
     print(k["name"], k["url"], k["branch"], since, ",".join(k.get("sparse", [])))
 ' |
@@ -34,5 +36,8 @@ while read -r name url branch since sparse; do
 done
 
 (cd tools/dbhub && npm ci --ignore-scripts --no-audit --no-fund --silent)
+python3 -m pip install --quiet -r requirements.txt
 python3 -I tools/gen_anchors.py
+# files with committed credentials inside the clones: denied to the brain (data/secret_files.txt). Lists files, never values.
+python3 -I tools/scan_secrets.py || echo "  (scan_secrets failed: the well-known secret file names are still denied)"
 echo "done. Next: cp .env.example .env and fill it; see README 'Chạy thử'."

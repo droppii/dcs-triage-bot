@@ -98,3 +98,44 @@ assert rpc('nonsense')['error']['code'] == -32601
 proc.stdin.close()
 proc.wait(timeout=10)
 print('ok repo_git_mcp')
+
+
+# ---- credential files are not readable through git either (Read/Grep are denied on them, so git must not be the way round) ----
+kn = Path(tempfile.mkdtemp(prefix='dcs-kn-')) / 'knowledge'
+(kn.parent / 'data').mkdir()
+(kn.parent / 'data' / 'secret_files.txt').write_text('svc/odd/token.txt\n', encoding='utf-8')
+repo2 = kn / 'svc'
+(repo2 / 'config').mkdir(parents=True)
+(repo2 / 'odd').mkdir()
+(repo2 / 'src').mkdir()
+(repo2 / 'config' / 'application-prod.yml').write_text('db_password: Pr0dSecret!\n')
+(repo2 / '.env').write_text('API_KEY=abcd1234efgh5678\n')
+(repo2 / 'odd' / 'token.txt').write_text('listed by the scanner: ListedSecret99\n')
+(repo2 / 'src' / 'B.java').write_text('class B {}\n')
+
+
+def g2(*a):
+    subprocess.run(['git', '-C', str(repo2), '-c', 'user.name=T', '-c', 'user.email=t@x.io', *a], check=True, capture_output=True)
+
+
+g2('init', '-q', '-b', 'dev')
+g2('add', '-f', '.')
+g2('commit', '-qm', 'add config')
+sha2 = subprocess.run(['git', '-C', str(repo2), 'rev-parse', 'HEAD'], capture_output=True, text=True).stdout.strip()
+proc = subprocess.Popen([sys.executable, '-I', str(SERVER), '--root', str(kn)], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                        text=True, encoding='utf-8')
+_id = 0
+rpc('initialize', {'protocolVersion': '2025-03-26'})
+text, err = tool('git_file', repo='svc', ref='HEAD', path='src/B.java', line_start=1, line_end=1)
+assert not err and 'class B' in text, text
+for path in ('config/application-prod.yml', '.env', 'odd/token.txt'):
+    for name, extra in (('git_file', {'ref': 'HEAD', 'line_start': 1, 'line_end': 5}), ('git_blame', {'line_start': 1, 'line_end': 1}),
+                        ('git_show', {'sha': sha2})):
+        text, err = tool(name, repo='svc', path=path, **extra)
+        assert err and 'credentials' in text and 'Pr0dSecret' not in text and 'abcd1234' not in text, (name, path, text)
+text, err = tool('git_show', repo='svc', sha=sha2)                      # whole commit: the credential files are excluded from the diff
+assert not err and 'class B' in text, text
+assert not any(s in text for s in ('Pr0dSecret', 'abcd1234efgh', 'ListedSecret99')), text
+proc.stdin.close()
+proc.wait(timeout=10)
+print('ok repo_git_mcp secrets')

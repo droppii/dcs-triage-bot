@@ -10,6 +10,10 @@
     "base_token": "UMiebZAFMahsj2s54uhlz3Ojgeh",
     "schedule_table": "tblw7ZnVIRvIlrXz"
   },
+  "ticket_source": {
+    "note": "Nguồn ticket và nơi ghi kết quả. sandbox: ticket và kết quả đều ở Base sandbox (hiện tại). shadow: ĐỌC ticket thật từ base_token/tickets_table (chỉ đọc), kết quả chỉ đăng ở group sandbox và lưu trong data/shadow_state.json; không bao giờ ghi vào Base hay group DCS thật. Chỉ ticket tạo SAU lúc bắt đầu chạy shadow mới được xử lý (since); max_new_per_tick giới hạn số ticket mới mỗi lượt. Dùng file cấu hình riêng cho PROD: config.prod.example.json.",
+    "mode": "sandbox"
+  },
   "env": {
     "note": "Gắn cứng theo môi trường. Chuyển PROD = đổi khối này (xem docs/PROD-READINESS.md), không sửa agent/RULES.md.",
     "name": "staging",
@@ -152,6 +156,21 @@
   "card_wait_minutes": 3,
   "claude_timeout_seconds": 900,
   "redact_logs": false,
+  "log_retention_days": 0,
+  "output_guard": {
+    "note": "Câu trả lời cần che quá max_masked mục dữ liệu cá nhân/bí mật thì KHÔNG đăng, chuyển người trực (0 = tắt). Bộ che là danh sách đen nên chỉ là lớp phụ: lớp chính là quyền DB (docs/prod-db-role.sql) và allowlist SQL.",
+    "max_masked": 5
+  },
+  "db_guard": {
+    "note": "Staging: tắt (DBHub trực tiếp). PROD luôn bật, không tắt được: mọi SQL đi qua tools/dbhub_guard_mcp.py, chỉ chạy bảng/cột trong allowlist (xem config/db_allowlist.example.json) và chỉ chạy câu SQL do guard tái sinh.",
+    "enabled": false,
+    "allowlist": "config/db_allowlist.json"
+  },
+  "lark_identity": {
+    "note": "Danh tính lark-cli: read = đọc Base/chat, write = ghi cột bot vào Base sandbox. 'user' là token cá nhân (quyền rộng); chuyển sang 'bot' khi app bot đã được cấp quyền vào Base/group sandbox và Base DCS.",
+    "read": "user",
+    "write": "user"
+  },
   "attachments": {
     "note": "Tên cột ảnh/file đính kèm trong Base ticket (để trống = không dùng). Bot tải ảnh để model đọc chuỗi lỗi nguyên văn.",
     "fields": [],

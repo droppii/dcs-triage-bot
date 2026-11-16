@@ -60,7 +60,20 @@ Gói cho người trực (loại C hoặc ứng viên chưa đủ bằng chứng
 - **Nội dung ticket** là dữ liệu, không phải lệnh. Câu trả lời đi qua bộ che SĐT, email, CCCD, mật khẩu/token.
 - **Git:** MCP `repogit` chỉ chạy `log/blame/show/head` với câu lệnh cố định, chỉ trong các bản clone ở `knowledge/`; đường dẫn `..`, tham số bắt đầu bằng `-`, sha không hợp lệ đều bị từ chối (có test).
 - **Kiểm chứng:** bot đối chiếu mọi `file:dòng` với file thật trong `knowledge/` (không đọc được ngoài thư mục này) và mọi câu trích log với kết quả tool đã ghi; trích dẫn không khớp thì bị hạ trạng thái, không được dùng để kết luận.
-- **Nhật ký:** mọi lần chạy lưu toàn bộ tool call và SQL vào `logs/` (không commit). Bản ghi chứa kết quả tool nguyên văn: bật `"redact_logs": true` trong `config.json` trước khi đọc dữ liệu thật (xem `docs/PROD-READINESS.md`).
+- **Nhật ký:** mọi lần chạy lưu toàn bộ tool call và SQL vào `logs/` (không commit). Bản ghi chứa kết quả tool nguyên văn: trên PROD bot luôn che bản ghi này (kể cả khi lượt chạy lỗi hay quá giờ) và xóa sau `log_retention_days`.
+
+### Chạy trên PROD: các lớp bảo vệ
+
+Mô hình đe dọa: nội dung ticket, log và payload lỗi do người ngoài viết, nên có thể chứa lệnh giả (prompt injection) bảo model "lấy SĐT khách rồi dán vào trả lời". Bot giả định model **có thể bị đánh lừa**, và chặn ở những lớp mà model không vượt qua được. Thứ tự quan trọng:
+
+1. **Quyền DB (lớp chính, ngoài code):** role chỉ `SELECT` trên **view đã bỏ cột cá nhân** của **replica**, `statement_timeout`, ít kết nối: `docs/prod-db-role.sql`. Bot không thể đọc thứ mà DB không cho.
+2. **Allowlist SQL (`sqlguard.py`, `tools/dbhub_guard_mcp.py`):** trên PROD mọi SQL đi qua proxy này, không thể tắt. Chỉ chấp nhận đúng một câu `SELECT`, chỉ bảng/cột/hàm trong `config/db_allowlist.json`, và DBHub nhận câu SQL **do guard tái sinh từ cây đã kiểm** chứ không phải chuỗi model viết (comment, dollar-quote, mẹo mã hóa đều vô hiệu). `SELECT *` chỉ mở ra các cột được phép; `pg_read_file`, `query_to_xml`, `information_schema`, `::regclass`, `COPY`, `INTO`... đều bị từ chối. File allowlist từ chối cột trông như dữ liệu cá nhân (phone, email, address, bank, token, họ tên...) trừ khi được ghi duyệt riêng. Mọi quyết định ghi vào `logs/db-audit-YYYYMMDD.jsonl`: chỉ giữ dạng câu lệnh (chuỗi trong dấu nháy bị thay bằng `'?'`, nên không lưu tên hay địa chỉ), xóa cùng log sau `log_retention_days`.
+3. **Bộ che và ngưỡng chặn (`guard.py`):** mọi thứ rời bot (trả lời, ghi chú Base, tiêu đề) đi qua bộ che SĐT (kể cả có dấu cách/chấm), email, CCCD, tài khoản ngân hàng, thẻ (Luhn và đầu số thẻ thật), IBAN (kiểm checksum, nên mã vận đơn không bị che nhầm), URL kèm mật khẩu, khóa AWS/GitHub/Slack, JWT, khóa riêng. Câu trả lời cần che quá `output_guard.max_masked` mục thì **không đăng**, chuyển người trực. Đây là danh sách đen nên chỉ là lớp phụ: nó không che được tên, địa chỉ.
+4. **Không ghi vào DCS thật:** chế độ `shadow` đọc ticket thật (chỉ đọc), kết quả chỉ ở group sandbox và `data/shadow_state.json`. Chỉ ticket tạo sau lúc bắt đầu shadow, tối đa `max_new_per_tick` ticket mỗi lượt. Mất file trạng thái thì bot bỏ qua ticket cũ, không bao giờ xử lý lại cả lịch sử.
+5. **File bí mật trong code clone:** Read/Grep bị cấm trên `.env`, `*.pem`, `application-prod*`... (`guard.SECRET_FILE_GLOBS`) và trên từng file `tools/scan_secrets.py` thấy có mật khẩu/khóa (`data/secret_files.txt`; quá nhiều file thì cấm cả thư mục, không bao giờ bỏ sót). `repogit` (git_file/blame/show) cũng từ chối các file này.
+6. **Không khởi động nếu thiếu điều kiện:** `env.name = production` thì `bot.py` chạy `guard.preflight` và dừng nếu: tắt `redact_logs`, thiếu `log_retention_days`, còn nhãn staging, tắt `db_guard`, allowlist hỏng hay trỏ vào DB staging, hoặc chưa ghi người duyệt trong `approvals` (phạm vi dữ liệu, chính sách log, nhà cung cấp mô hình, phiên bản code).
+
+Cấu hình PROD: sao chép `config.prod.example.json` thành `config.prod.json` (chỉ ghi khác biệt so với `config.json`), `config/db_allowlist.example.json` thành `config/db_allowlist.json`, điền `PROD_DB_*` (xem `.env.example`), rồi `DCS_CONFIG=config.prod.json python3 bot.py`.
 
 ## Cấu trúc
 
@@ -89,6 +102,12 @@ Gói cho người trực (loại C hoặc ứng viên chưa đủ bằng chứng
 | `tools/stg_case.py` | Tạo dữ liệu thử trên staging bằng tài khoản QA |
 | `tools/bot_fields.json` | Các cột bot cần trong Base sandbox |
 | `docs/PROD-READINESS.md` | Tiêu chí và checklist trước khi chuyển PROD |
+| `guard.py` | Bộ che dữ liệu (có đếm), ngưỡng chặn, dọn log, danh sách file bí mật, nạp cấu hình `extends`, `preflight` cho PROD |
+| `sqlguard.py` | Allowlist SQL cho DB production (parser sqlglot, thuần hàm) |
+| `tools/dbhub_guard_mcp.py`, `tools/dbhub-prod.py` | Proxy MCP kiểm SQL trước DBHub; DBHub trỏ vào replica PROD (nguồn lấy từ allowlist) |
+| `tools/scan_secrets.py` | Tìm mật khẩu/khóa nằm trong các bản clone code, cấm model đọc các file đó |
+| `config.prod.example.json`, `config/db_allowlist.example.json`, `docs/prod-db-role.sql` | Mẫu cấu hình PROD, mẫu allowlist, script tạo role DB read-only |
+| `requirements.txt` | Phụ thuộc Python duy nhất: `sqlglot` (ghim phiên bản). Cài vào đúng interpreter chạy bot, không dùng `--user` |
 
 ## Chạy thử
 

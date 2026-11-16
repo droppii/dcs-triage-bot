@@ -9,3 +9,6 @@ tools/dbhub/node_modules/
 lark-im-resources/
 __pycache__/
 .DS_Store
+# production-only config: the real allowlist of DB tables/columns and the filled-in prod config (the *.example.json files are committed)
+config/db_allowlist.json
+config.prod.json
