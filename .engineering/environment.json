@@ -1,0 +1,8 @@
+{
+  "kind": "ainery-environment-contract-v2",
+  "component": "dcs-triage-bot",
+  "connectors": ["github"],
+  "environments": {},
+  "partners": [],
+  "notes": "Derived on 2026-11-24 from droppii/manifest origin/main (cluster/argocd ApplicationSets vn-stg/vn-beta/vn-prod, apps/base + apps/overlay ConfigMaps; SealedSecrets read by key name only), the Ainery data-broker configs (cluster/ainery/control-plane/hk-stg/data-broker.json, cluster/ainery/brokers/hk-prod/data-broker.json), Ainery's inventories (datastores.json, partners.json, onboarding-inventory.json) and the repository's own code/config. No deployment in droppii/manifest. tools/dbhub-stg.py points at staging databases for local triage; not declared as a system data scope."
+}
