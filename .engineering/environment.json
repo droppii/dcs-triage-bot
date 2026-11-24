@@ -1,0 +1,25 @@
+{
+  "component": "dcs-triage-bot",
+  "connectors": [
+    "github",
+    "postgres",
+    "newrelic",
+    "sentry",
+    "bugsnag"
+  ],
+  "environments": {},
+  "partners": [
+    {
+      "beta": "none",
+      "name": "Lark Open API (sandbox Base/group)",
+      "production": "none",
+      "staging": "production"
+    },
+    {
+      "beta": "none",
+      "name": "Anthropic Claude (Claude Code CLI)",
+      "production": "none",
+      "staging": "production"
+    }
+  ]
+}
